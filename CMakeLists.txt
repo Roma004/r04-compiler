@@ -5,6 +5,14 @@ project(r04-compiler LANGUAGES CXX)
 include_directories(include)
 add_definitions("-O0 -ggdb3 -std=c++17")
 
+file(GLOB_RECURSE TOOLS_SRC_FILES "${PROJECT_SOURCE_DIR}/src/*.cpp")
+
+add_library(tools STATIC ${TOOLS_SRC_FILES})
+
+add_library(tools_gcovr STATIC ${TOOLS_SRC_FILES})
+target_compile_options(tools_gcovr PRIVATE --coverage)
+target_link_options(tools_gcovr PRIVATE --coverage)
+
 # tests
 find_package(Catch2 REQUIRED)
 
@@ -13,6 +21,7 @@ set(ALL_TESTS all_tests)
 
 add_executable(${ALL_TESTS} ${TEST_FILES})
 target_link_libraries(${ALL_TESTS} PRIVATE Catch2::Catch2WithMain)
+target_link_libraries(${ALL_TESTS} PRIVATE tools_gcovr)
 target_compile_options(${ALL_TESTS} PRIVATE --coverage)
 target_link_options(${ALL_TESTS} PRIVATE --coverage)
 add_test(NAME ${ALL_TESTS} COMMAND ${ALL_TESTS})
