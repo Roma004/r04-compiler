@@ -3,10 +3,10 @@
 #include <cassert>
 #include <cstddef>
 #include <iterator>
-#include <list>
 #include <sys/types.h>
 #include <utility>
 
+#include "tools/anytypelist.hpp"
 #include "tools/fixedset.hpp"
 #include "tools/iterator.hpp"
 #include "tools/macro_template.hpp"
@@ -31,8 +31,10 @@ namespace tools {
  */
 template <typename T, size_t blk_size = 64> class blocklist {
   protected:
+    struct sentinel {};
+
     using block_t = fixedset<T, blk_size>;
-    using list_t = std::list<block_t>;
+    using list_t = anytypelist;
 
     struct iterator_content {
         using value_type = T;
@@ -41,8 +43,6 @@ template <typename T, size_t blk_size = 64> class blocklist {
         bool operator==(const iterator_content &) const noexcept;
         value_type &get() noexcept;
         void next() noexcept;
-
-        size_t get_idx();
 
         list_iterator lst_it;
         size_t blk_idx;
@@ -54,6 +54,13 @@ template <typename T, size_t blk_size = 64> class blocklist {
     /** @brief Forward iterator over the elements of the container */
     using iterator = ForwardIterator<iterator_content, false>;
     using const_iterator = ForwardIterator<iterator_content, true>;
+
+    blocklist();
+    blocklist(const blocklist &) = default;
+    blocklist(blocklist &&) noexcept = default;
+
+    blocklist &operator=(const blocklist &) noexcept = default;
+    blocklist &operator=(blocklist &&) noexcept = default;
 
     /**
      * @brief Constructs an element in-place and inserts it
@@ -96,7 +103,6 @@ template <typename T, size_t blk_size = 64> class blocklist {
     /** @brief returns number of elements in container */
     constexpr size_t size() const noexcept;
 
-    /** @brief returns current amount af allocated memory in elements */
     constexpr size_t capacity() const noexcept;
 
     void clear() noexcept;
@@ -122,6 +128,7 @@ template <typename T, size_t blk_size = 64> class blocklist {
 
     list_t blocks;
     size_t elements_num = 0;
+    iterator sent;
 };
 
 static_assert(sizeof(blocklist<int>::iterator) == 16);
@@ -139,50 +146,53 @@ BLOCKLIST_TEMPLATE
 bool BLOCKLIST::iterator_content::operator==(
     const iterator_content &other
 ) const noexcept {
-    return lst_it == other.lst_it
-        && const_cast<iterator_content &>(*this).get_idx()
-               == const_cast<iterator_content &>(other).get_idx();
+    if (lst_it->is<sentinel>()) return other.lst_it->is<sentinel>();
+    return lst_it == other.lst_it && blk_idx == other.blk_idx;
 }
 
 BLOCKLIST_TEMPLATE
 void BLOCKLIST::iterator_content::next() noexcept {
-    auto blk_next = std::next(lst_it->iter_at(get_idx()));
-    if (blk_next != lst_it->end()) {
-        blk_idx = lst_it->idx_of(blk_next);
+    assert(!lst_it->is<sentinel>());
+
+    block_t *cur_blk = &(lst_it->get<block_t>());
+    auto blk_next = std::next(cur_blk->iter_at(blk_idx));
+    if (blk_next != cur_blk->end()) {
+        blk_idx = cur_blk->idx_of(blk_next);
         return;
     }
     ++lst_it;
-    blk_idx = (size_t)-1;
+    if (lst_it->is<sentinel>()) return;
+    cur_blk = &(lst_it->get<block_t>());
+    blk_idx = cur_blk->idx_of(cur_blk->begin());
 }
 
 BLOCKLIST_TEMPLATE
 typename BLOCKLIST::iterator_content::value_type &
 BLOCKLIST::iterator_content::get() noexcept {
-    return *(lst_it->iter_at(get_idx()));
-}
-
-BLOCKLIST_TEMPLATE
-size_t BLOCKLIST::iterator_content::get_idx() {
-    if (blk_idx == (size_t)-1) blk_idx = lst_it->idx_of(lst_it->begin());
-    return blk_idx;
+    assert(!lst_it->is<sentinel>());
+    return *(lst_it->get<block_t>().iter_at(blk_idx));
 }
 
 // ---------------------------------------------------------------------------
 // blocklist implementation
 // ---------------------------------------------------------------------------
 
+BLOCKLIST_TEMPLATE
+BLOCKLIST::blocklist() : blocks(), elements_num(0) {
+    auto sent_it = blocks.emplace_front<sentinel>();
+    sent = iterator(iterator_content{sent_it, 0});
+}
+
 BLOCKLIST_TEMPLATE_ARGS(typename_args_of(Args, T))
 typename BLOCKLIST::iterator BLOCKLIST::emplace(Args &&...args) {
     auto lst_it = blocks.begin();
-    for (; lst_it != blocks.end(); ++lst_it) {
-        if (!lst_it->full()) break;
+    for (; lst_it->is<block_t>(); ++lst_it) {
+        if (!lst_it->get<block_t>().full()) break;
     }
-    if (lst_it == blocks.end()) {
-        blocks.emplace_back();
-        lst_it = std::prev(blocks.end());
-    }
+    if (lst_it->is<sentinel>()) lst_it = blocks.emplace_front<block_t>();
 
-    auto blk_it = lst_it->emplace(std::forward<Args &&>(args)...);
+    auto blk_it =
+        lst_it->get<block_t>().emplace(std::forward<Args &&>(args)...);
     elements_num += 1;
     return make_iter(lst_it, blk_it);
 }
@@ -199,9 +209,10 @@ typename BLOCKLIST::iterator BLOCKLIST::insert(T &&val) {
 
 BLOCKLIST_TEMPLATE
 typename BLOCKLIST::iterator BLOCKLIST::erase(iterator it) {
+    assert(it != sent);
     iterator next = std::next(it);
-    auto &lst = *it.get_content().lst_it;
-    lst.erase(lst.iter_at(it.get_content().get_idx()));
+    auto &lst = it.get_content().lst_it->template get<block_t>();
+    lst.erase(lst.iter_at(it.get_content().blk_idx));
     elements_num -= 1;
     if (lst.empty()) blocks.erase(it.get_content().lst_it);
     return next;
@@ -210,7 +221,7 @@ typename BLOCKLIST::iterator BLOCKLIST::erase(iterator it) {
 BLOCKLIST_TEMPLATE
 constexpr bool BLOCKLIST::empty() const noexcept {
     // return empty list if only sentinel node exists
-    return blocks.size() == 0;
+    return blocks.size() == 1;
 }
 
 BLOCKLIST_TEMPLATE
@@ -218,7 +229,7 @@ constexpr size_t BLOCKLIST::size() const noexcept { return elements_num; }
 
 BLOCKLIST_TEMPLATE
 constexpr size_t BLOCKLIST::capacity() const noexcept {
-    return blocks.size() * blk_size;
+    return blk_size * (blocks.size() - 1);
 }
 
 BLOCKLIST_TEMPLATE
@@ -235,27 +246,26 @@ typename BLOCKLIST::const_iterator BLOCKLIST::begin() const noexcept {
 }
 
 BLOCKLIST_TEMPLATE
-typename BLOCKLIST::iterator BLOCKLIST::end() noexcept {
-    return iterator({blocks.end(), (size_t)-1});
-}
+typename BLOCKLIST::iterator BLOCKLIST::end() noexcept { return sent; }
 
 BLOCKLIST_TEMPLATE
 typename BLOCKLIST::const_iterator BLOCKLIST::end() const noexcept {
-    BLOCKLIST *self = const_cast<BLOCKLIST *>(this);
-    return const_iterator({self->blocks.end(), (size_t)-1});
+    return sent;
 }
 
 BLOCKLIST_TEMPLATE
 typename BLOCKLIST::iterator
 BLOCKLIST::make_iter(list_iterator lst_it, block_iterator blk_it) noexcept {
-    size_t idx = lst_it->idx_of(blk_it);
+    assert(!lst_it->is<sentinel>());
+    size_t idx = lst_it->get<block_t>().idx_of(blk_it);
     return iterator({lst_it, idx});
 }
 
 BLOCKLIST_TEMPLATE
 typename BLOCKLIST::iterator
 BLOCKLIST::make_iter(list_iterator lst_it) noexcept {
-    return make_iter(lst_it, lst_it->begin());
+    assert(!lst_it->is<sentinel>());
+    return make_iter(lst_it, lst_it->get<block_t>().begin());
 }
 
 BLOCKLIST_TEMPLATE
