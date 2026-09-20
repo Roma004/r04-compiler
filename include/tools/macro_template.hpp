@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <type_traits>
 
 #define typename_cond(_Type, cond) typename _Type, std::enable_if_t<cond>
@@ -8,10 +9,8 @@
     typename... _Args,                 \
         std::enable_if_t<std::is_constructible_v<_Type, _Args...>, int>
 
-#define typename_construct_assign(_Type)                    \
-    typename _Type, std::enable_if_t<                       \
-                        std::is_copy_constructible_v<_Type> \
-                        && std::is_copy_assignable_v<_Type>>
+#define IS_COPYABLE(_Type) \
+    std::is_copy_constructible_v<_Type> &&std::is_copy_assignable_v<_Type>
 
 #define HAS_NOEXCEPT_COPY(T)    std::is_nothrow_copy_constructible_v<T>
 #define HAS_NOEXCEPT_MOVE(T)    std::is_nothrow_move_constructible_v<T>
@@ -19,6 +18,7 @@
 #define HAS_NOEXCEPT_DESTROY(T) std::is_nothrow_move_constructible_v<T>
 
 namespace detail {
+
 template <typename, template <typename...> class, typename... Args>
 struct has_attr_impl : std::false_type {};
 
@@ -46,4 +46,38 @@ using has_attr = detail::has_attr_impl<void, Op, Args...>;
 template <template <typename...> class Op, typename... Args>
 inline constexpr bool has_attr_v = has_attr<Op, Args...>::value;
 
+template <typename T, typename = void>
+struct has_to_string : std::false_type {};
+
+template <typename T>
+struct has_to_string<
+    T,
+    std::void_t<decltype(std::to_string(std::declval<T>()))>> :
+    std::true_type {};
+
+template <typename T>
+inline constexpr bool has_to_string_v = has_to_string<T>::value;
+
 } // namespace detail
+
+namespace helpers {
+
+template <typename... Args>
+std::string format(std::string_view fmt, Args &&...args) noexcept{
+    using std::to_string;
+    std::array<std::string, sizeof...(args)> strs = {to_string(args)...};
+    std::string result;
+    size_t next = 0;
+
+    for (size_t i = 0; i < fmt.size(); ++i) {
+        if (fmt[i] == '{' && i + 1 < fmt.size() && fmt[i + 1] == '}') {
+            if (next < strs.size()) result += strs[next++];
+            ++i;
+        } else {
+            result += fmt[i];
+        }
+    }
+
+    return result;
+};
+} // namespace helpers
