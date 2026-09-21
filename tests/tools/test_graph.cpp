@@ -19,7 +19,7 @@ using node_iter = graph_t::node_iter;
 using edge_iter = graph_t::edge_iter;
 
 // Traverse from start with the default DFS/FORWARD and collect the data of
-// every edge that was used to discover a new nod = InspectDirection::FORWARDe
+// every edge that was used to discover a new node = InspectDirection::FORWARD
 template <
     InspectType type = InspectType::DFS,
     InspectDirection dir = InspectDirection::FORWARD>

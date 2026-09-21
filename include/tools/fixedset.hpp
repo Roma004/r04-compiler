@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <new>
 #include <stdexcept>
@@ -47,6 +48,7 @@ template <typename T, size_t blk_size = 64> class fixedset {
         fixedset<T, blk_size> *parent;
         light_iterator it;
     };
+    static_assert(IteratorContext<iterator_content>);
 
   public:
     using iterator = ForwardIterator<iterator_content, false>;
@@ -72,7 +74,9 @@ template <typename T, size_t blk_size = 64> class fixedset {
      * @throws Any exception thrown by `T`'s constructor. In that case the
      *         set is left unchanged
      */
-    template <typename_args_of(Args, T) = 0> iterator emplace(Args &&...args);
+    template <typename... Args>
+        requires std::constructible_from<T, Args...>
+    iterator emplace(Args &&...args);
 
     /**
      * @brief Inserts a copy of an element into the first free slot
@@ -147,7 +151,6 @@ template <typename T, size_t blk_size = 64> class fixedset {
 };
 
 #define FIXEDSET_TEMPLATE           template <typename T, size_t blk_size>
-#define FIXEDSET_TEMPLATE_ARGS(...) FIXEDSET_TEMPLATE template <__VA_ARGS__>
 #define FIXEDSET                    fixedset<T, blk_size>
 
 // ---------------------------------------------------------------------------
@@ -252,11 +255,13 @@ void FIXEDSET::swap(fixedset &o) noexcept(
     swap(map, o.map);
 }
 
-FIXEDSET_TEMPLATE_ARGS(typename_args_of(Args, T))
+FIXEDSET_TEMPLATE
+template <typename... Args>
+    requires std::constructible_from<T, Args...>
 typename FIXEDSET::iterator FIXEDSET::emplace(Args &&...args) {
     ssize_t idx = map.find_free_idx();
     if (idx == -1) throw std::length_error("fixedset is full");
-    new (&block[idx]) T(std::forward<Args&&>(args)...);
+    new (&block[idx]) T(std::forward<Args &&>(args)...);
     map.set(idx);
     return iter_at(idx);
 }
@@ -390,6 +395,5 @@ inline void swap(FIXEDSET &a, FIXEDSET &b) noexcept(
 
 #undef FIXEDSET
 #undef FIXEDSET_TEMPLATE
-#undef FIXEDSET_TEMPLATE_ARGS
 
 } // namespace tools

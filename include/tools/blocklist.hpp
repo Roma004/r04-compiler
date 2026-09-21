@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <iterator>
 #include <list>
@@ -9,7 +10,6 @@
 
 #include "tools/fixedset.hpp"
 #include "tools/iterator.hpp"
-#include "tools/macro_template.hpp"
 
 namespace tools {
 
@@ -47,6 +47,7 @@ template <typename T, size_t blk_size = 64> class blocklist {
         list_iterator lst_it;
         size_t blk_idx;
     };
+    static_assert(IteratorContext<iterator_content>);
 
   public:
     using value_type = T;
@@ -62,7 +63,9 @@ template <typename T, size_t blk_size = 64> class blocklist {
      * @param  args  Arguments forwarded to T's constructor
      * @return       Iterator to the newly inserted element
      */
-    template <typename_args_of(Args, T) = 0> iterator emplace(Args &&...args);
+    template <typename... Args>
+        requires std::constructible_from<T, Args...>
+    iterator emplace(Args &&...args);
 
     /**
      * @brief Inserts a copy of an element.
@@ -171,7 +174,9 @@ size_t BLOCKLIST::iterator_content::get_idx() {
 // blocklist implementation
 // ---------------------------------------------------------------------------
 
-BLOCKLIST_TEMPLATE_ARGS(typename_args_of(Args, T))
+BLOCKLIST_TEMPLATE
+template <typename... Args>
+    requires std::constructible_from<T, Args...>
 typename BLOCKLIST::iterator BLOCKLIST::emplace(Args &&...args) {
     auto lst_it = blocks.begin();
     for (; lst_it != blocks.end(); ++lst_it) {

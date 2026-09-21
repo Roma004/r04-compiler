@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "tools/graph.hpp"
-#include "tools/macro_template.hpp"
 
 namespace {
 

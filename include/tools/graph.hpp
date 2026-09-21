@@ -1,4 +1,5 @@
 #pragma once
+#include <concepts>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -16,22 +17,21 @@
 
 namespace tools {
 
-namespace {
-template <typename T, typename U>
-using enable_orgraph_t =
-    std::enable_if_t<IS_COPYABLE(T) && IS_COPYABLE(U), int>;
-} // namespace
+template <typename T>
+concept NodeCtx = requires {
+    std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>;
+};
 
-#define GRAPH_TEMPLATE      \
-    template <              \
-        typename node_data, \
-        typename edge_data, \
-        enable_orgraph_t<node_data, edge_data> = 0>
-#define GRAPH_TEMPLATE_ARGS(...) GRAPH_TEMPLATE template <__VA_ARGS__>
-#define GRAPH_ARGS               node_data, edge_data, N
-#define GRAPH                    orgraph_t<GRAPH_ARGS>
-#define GRAPH_EDGE               edge_t<GRAPH_ARGS>
-#define GRAPH_NODE               node_t<GRAPH_ARGS>
+template <typename T>
+concept EdgeCtx = requires {
+    std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>;
+};
+
+#define GRAPH_TEMPLATE template <NodeCtx node_data, EdgeCtx edge_data>
+#define GRAPH_ARGS     node_data, edge_data
+#define GRAPH          orgraph_t<GRAPH_ARGS>
+#define GRAPH_EDGE     edge_t<GRAPH_ARGS>
+#define GRAPH_NODE     node_t<GRAPH_ARGS>
 
 GRAPH_TEMPLATE class orgraph_t;
 
@@ -44,13 +44,6 @@ enum InspectDirection { FORWARD, BACKWARD };
 
 GRAPH_TEMPLATE struct node_t;
 GRAPH_TEMPLATE struct edge_t;
-
-#undef GRAPH_TEMPLATE
-#define GRAPH_TEMPLATE      \
-    template <              \
-        typename node_data, \
-        typename edge_data, \
-        enable_orgraph_t<node_data, edge_data> N>
 
 GRAPH_TEMPLATE
 using node_container_t = blocklist<graph::node_t<GRAPH_ARGS>, nodes_block_size>;
@@ -95,7 +88,8 @@ class orgraph_t {
      * @param  args  Arguments forwarded to node_data's constructor
      * @return iterator to the node created
      */
-    template <typename_args_of(Args, node_data) = 0>
+    template <typename... Args>
+        requires std::constructible_from<node_data, Args...>
     node_iter emplace_node(Args &&...args);
 
     /**
@@ -107,7 +101,8 @@ class orgraph_t {
      * @return iterator to the edge created
      * @throws std::logic_error if edge source->target already exists in graph
      */
-    template <typename_args_of(Args, edge_data) = 0>
+    template <typename... Args>
+        requires std::constructible_from<edge_data, Args...>
     edge_iter emplace_edge(node_iter source, node_iter target, Args &&...args);
 
     /**
@@ -212,7 +207,8 @@ namespace graph {
 GRAPH_TEMPLATE struct edge_t {
     using node_iter = node_iterator<GRAPH_ARGS>;
 
-    template <typename_args_of(Args, edge_data) = 0>
+    template <typename... Args>
+        requires std::constructible_from<edge_data, Args...>
     edge_t(node_iter source, node_iter target, Args &&...args);
 
     edge_data &get_data() noexcept;
@@ -221,26 +217,14 @@ GRAPH_TEMPLATE struct edge_t {
     node_iter source() const noexcept;
     node_iter target() const noexcept;
 
+    std::string repr() const noexcept;
+
   private:
     edge_data data;
     node_iter source_node;
     node_iter target_node;
 
     friend class orgraph_t<GRAPH_ARGS>;
-
-  public:
-    friend std::string to_string(const edge_t &e) noexcept {
-        if constexpr (detail::has_to_string_v<edge_data>) {
-            using std::to_string;
-            return to_string(e.get_data());
-        } else if constexpr (
-            std::is_convertible_v<edge_data, std::string_view>
-        ) {
-            return std::string(e.get_data());
-        } else {
-            return "edge[0x" + std::to_string((uintptr_t)&e.get_data()) + "]";
-        }
-    }
 };
 
 GRAPH_TEMPLATE struct node_t {
@@ -250,7 +234,9 @@ GRAPH_TEMPLATE struct node_t {
     using edges_list_t = std::vector<edge_iter>;
     using edge_position = typename edges_list_t::const_iterator;
 
-    template <typename_args_of(Args, node_data) = 0> node_t(Args &&...args);
+    template <typename... Args>
+        requires std::constructible_from<node_data, Args...>
+    node_t(Args &&...args);
 
     node_data &get_data() noexcept;
     const node_data &get_data() const noexcept;
@@ -261,26 +247,14 @@ GRAPH_TEMPLATE struct node_t {
     edge_position get_edge_target(node_iter target) const noexcept;
     edge_position get_edge_source(node_iter target) const noexcept;
 
+    std::string repr() const noexcept;
+
   private:
     node_data data;
     edges_list_t forward_list;
     edges_list_t backward_list;
 
     friend class orgraph_t<GRAPH_ARGS>;
-
-  public:
-    friend std::string to_string(const node_t &n) noexcept {
-        if constexpr (detail::has_to_string_v<node_data>) {
-            using std::to_string;
-            return to_string(n.get_data());
-        } else if constexpr (
-            std::is_convertible_v<node_data, std::string_view>
-        ) {
-            return std::string(n.get_data());
-        } else {
-            return "node[0x" + std::to_string((uintptr_t)&n.get_data()) + "]";
-        }
-    }
 };
 
 } // namespace graph
@@ -291,7 +265,9 @@ GRAPH_TEMPLATE struct node_t {
 
 namespace graph {
 
-GRAPH_TEMPLATE_ARGS(typename_args_of(Args, edge_data))
+GRAPH_TEMPLATE
+template <typename... Args>
+    requires std::constructible_from<edge_data, Args...>
 GRAPH_EDGE::edge_t(node_iter source, node_iter target, Args &&...args) :
     data(std::forward<Args...>(args...)), source_node(source),
     target_node(target) {}
@@ -312,6 +288,18 @@ node_iterator<GRAPH_ARGS> GRAPH_EDGE::source() const noexcept {
     return source_node;
 }
 
+GRAPH_TEMPLATE
+std::string GRAPH_EDGE::repr() const noexcept {
+    if constexpr (helpers::Stringifiable<edge_data>) {
+        using std::to_string;
+        return to_string(data);
+    } else if constexpr (std::is_convertible_v<edge_data, std::string_view>) {
+        return std::string(data);
+    } else {
+        return "edge[0x" + std::to_string((uintptr_t)&data) + "]";
+    }
+}
+
 }; // namespace graph
 
 // ---------------------------------------------------------------------------
@@ -320,7 +308,9 @@ node_iterator<GRAPH_ARGS> GRAPH_EDGE::source() const noexcept {
 
 namespace graph {
 
-GRAPH_TEMPLATE_ARGS(typename_args_of(Args, node_data))
+GRAPH_TEMPLATE
+template <typename... Args>
+    requires std::constructible_from<node_data, Args...>
 GRAPH_NODE::node_t(Args &&...args) :
     data(std::forward<Args &&...>(args...)), backward_list(), forward_list() {}
 
@@ -358,6 +348,18 @@ GRAPH_NODE::get_edge_source(node_iter source) const noexcept {
     return backward_list.end();
 }
 
+GRAPH_TEMPLATE
+std::string GRAPH_NODE::repr() const noexcept {
+    if constexpr (helpers::Stringifiable<node_data>) {
+        using std::to_string;
+        return to_string(data);
+    } else if constexpr (std::is_convertible_v<node_data, std::string_view>) {
+        return std::string(data);
+    } else {
+        return "edge[0x" + std::to_string((uintptr_t)&data) + "]";
+    }
+}
+
 } // namespace graph
 
 // ---------------------------------------------------------------------------
@@ -380,19 +382,23 @@ typename GRAPH::const_node_iter GRAPH::end() const noexcept {
     return nodes_list.end();
 }
 
-GRAPH_TEMPLATE_ARGS(typename_args_of(Args, node_data))
+GRAPH_TEMPLATE
+template <typename... Args>
+    requires std::constructible_from<node_data, Args...>
 typename GRAPH::node_iter GRAPH::emplace_node(Args &&...args) {
     return nodes_list.emplace(std::forward<Args &&>(args)...);
 }
 
-GRAPH_TEMPLATE_ARGS(typename_args_of(Args, edge_data))
+GRAPH_TEMPLATE
+template <typename... Args>
+    requires std::constructible_from<edge_data, Args...>
 typename GRAPH::edge_iter
 GRAPH::emplace_edge(node_iter source, node_iter target, Args &&...args) {
     // if edge between `from` and `to` already exists do not create a new one
     auto edge_o = source->get_edge_target(target);
     if (edge_o != source->forward_edges().end()) {
         throw std::logic_error(
-            helpers::format(
+            std::format(
                 "Can't insert the egde. duplicates existing edge `{}`[{} --> "
                 "{}]",
                 *(*edge_o),
@@ -430,7 +436,7 @@ void GRAPH::set_egde_target(edge_iter edge, node_iter new_target) {
     } else {
         auto &dup_e = *pos;
         throw std::logic_error(
-            helpers::format(
+            std::format(
                 "can't change target of edge `{}`[{} --> {}]. Such operation"
                 " will duplicate existing edge `{}`[{} --> {}]",
                 *edge,
@@ -463,7 +469,7 @@ void GRAPH::set_egde_source(edge_iter edge, node_iter new_source) {
     } else {
         auto &dup_e = *pos;
         throw std::logic_error(
-            helpers::format(
+            std::format(
                 "can't change source of edge `{}`[{} --> {}]. Such operation"
                 " will duplicate existing edge `{}`[{} --> {}]",
                 *edge,
@@ -495,7 +501,8 @@ void GRAPH::remove_edge(edge_iter edge) {
     edges_list.erase(edge);
 }
 
-GRAPH_TEMPLATE_ARGS(graph::InspectType type, graph::InspectDirection dir)
+GRAPH_TEMPLATE
+template <graph::InspectType type, graph::InspectDirection dir>
 void GRAPH::traverse(
     node_iter start,
     std::function<bool(node_iter, edge_iter, node_iter, bool)> handle
@@ -543,7 +550,8 @@ void GRAPH::traverse(
     }
 }
 
-GRAPH_TEMPLATE_ARGS(graph::InspectType type, graph::InspectDirection dir)
+GRAPH_TEMPLATE
+template <graph::InspectType type, graph::InspectDirection dir>
 void GRAPH::traverse(
     node_iter start,
     std::function<bool(node_data &, edge_data &, node_data &, bool)> handle
@@ -563,7 +571,8 @@ void GRAPH::traverse(
     );
 }
 
-GRAPH_TEMPLATE_ARGS(graph::InspectType type, graph::InspectDirection dir)
+GRAPH_TEMPLATE
+template <graph::InspectType type, graph::InspectDirection dir>
 void GRAPH::traverse(
     node_iter start,
     std::function<
@@ -606,13 +615,11 @@ GRAPH_TEMPLATE void GRAPH::assert_integrity() const {
             uintptr_t key = (uintptr_t)&*e;
             if (check_map.find(key) == check_map.end())
                 throw std::runtime_error(
-                    helpers::format(
-                        "{} has unregistered forward edge", n
-                    )
+                    std::format("{} has unregistered forward edge", n)
                 );
             if (check_map[key].source != nullptr)
                 throw std::runtime_error(
-                    helpers::format(
+                    std::format(
                         "{} is forward for both {} and {}",
                         *e,
                         n,
@@ -625,13 +632,11 @@ GRAPH_TEMPLATE void GRAPH::assert_integrity() const {
             uintptr_t key = (uintptr_t)&*e;
             if (check_map.find(key) == check_map.end())
                 throw std::runtime_error(
-                    helpers::format(
-                        "{} has unregistered backward edge", n
-                    )
+                    std::format("{} has unregistered backward edge", n)
                 );
             if (check_map[key].target != nullptr)
                 throw std::runtime_error(
-                    helpers::format(
+                    std::format(
                         "{} is backward for both {} and {}",
                         *e,
                         n,
@@ -645,19 +650,17 @@ GRAPH_TEMPLATE void GRAPH::assert_integrity() const {
     for (auto &&[key, row] : check_map) {
         if (row.target == nullptr)
             throw std::runtime_error(
-                helpers::format(
+                std::format(
                     "{} is not present in any of backward lists", *row.e
                 )
             );
         if (row.source == nullptr)
             throw std::runtime_error(
-                helpers::format(
-                    "{} is not present in any of forward lists", *row.e
-                )
+                std::format("{} is not present in any of forward lists", *row.e)
             );
         if (&*row.e->target() != row.target)
             throw std::runtime_error(
-                helpers::format(
+                std::format(
                     "target of {} is {}, however it is backward of {}",
                     *row.e,
                     *row.e->target(),
@@ -666,7 +669,7 @@ GRAPH_TEMPLATE void GRAPH::assert_integrity() const {
             );
         if (&*row.e->source() != row.source)
             throw std::runtime_error(
-                helpers::format(
+                std::format(
                     "source of {} is {}, however it is forward of {}",
                     *row.e,
                     *row.e->source(),
@@ -677,7 +680,9 @@ GRAPH_TEMPLATE void GRAPH::assert_integrity() const {
 }
 
 #undef GRAPH_TEMPLATE
-#undef GRAPH_TEMPLATE_ARGS
 #undef GRAPH
+#undef GRAPH_ARGS
+#undef GRAPH_EDGE
+#undef GRAPH_NODE
 
 } // namespace tools

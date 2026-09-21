@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.10)
 project(r04-compiler LANGUAGES CXX)
 
 include_directories(include)
-add_definitions("-O0 -ggdb3 -std=c++17")
+add_definitions("-O0 -ggdb3 -std=c++20")
 
 # tests
 find_package(Catch2 REQUIRED)

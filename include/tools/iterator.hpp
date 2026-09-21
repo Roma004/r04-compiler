@@ -1,16 +1,23 @@
 #pragma once
 
 #include "macro_template.hpp"
+#include <concepts>
 #include <iterator>
 #include <type_traits>
 #include <utility>
 
 namespace tools {
 
-#define ITERATOR_TEMPLATE       template <typename content_type, bool is_const>
+template <typename Ctx>
+concept IteratorContext = requires(Ctx ctx, const Ctx &const_ctx) {
+    typename Ctx::value_type;
+    { ctx.next() } -> std::same_as<void>;
+    { ctx.get() } -> std::same_as<typename Ctx::value_type &>;
+    { const_ctx == const_ctx } -> std::same_as<bool>;
+};
+
+#define ITERATOR_TEMPLATE template <IteratorContext content_type, bool is_const>
 #define ITERATOR_OTHER_TEMPLATE template <bool other_const>
-#define ITERATOR_OTHER_TEMPLATE_COND(cond) \
-    template <bool other_const, std::enable_if_t<cond, int> = 0>
 
 #define ITERATOR       ForwardIterator<content_type, is_const>
 #define ITERATOR_OTHER ForwardIterator<content_type, other_const>
@@ -53,36 +60,6 @@ namespace tools {
  *       calls the non-const one
  */
 ITERATOR_TEMPLATE class ForwardIterator {
-    /** @brief Compile-time requirements imposed on `content_type` */
-    struct req {
-        template <typename T>
-        using next_op =
-            detail::ret_type_is<decltype(std::declval<T>().next()), void>;
-
-        template <typename T>
-        using get_op = detail::ret_type_is<
-            decltype(std::declval<T>().get()),
-            typename T::value_type &>;
-
-        template <typename T> using value_type_op = typename T::value_type;
-    };
-    static_assert(
-        detail::has_attr_v<req::template value_type_op, content_type>,
-        "type content_type::value_type must be defined"
-    );
-    static_assert(
-        detail::has_attr_v<req::template next_op, content_type>,
-        "method content_type::next must be defined"
-    );
-    static_assert(
-        detail::has_attr_v<req::template get_op, content_type>,
-        "method content_type::get must be defined"
-    );
-    static_assert(
-        detail::has_attr_v<detail::compare_operator, content_type>,
-        "method content_type::operator== must be defined"
-    );
-
     friend class ForwardIterator<content_type, !is_const>;
 
   public:
@@ -109,38 +86,38 @@ ITERATOR_TEMPLATE class ForwardIterator {
      * @brief Converting copy constructor from a (possibly) more mutable
      *        iterator.
      */
-    ITERATOR_OTHER_TEMPLATE_COND(
+    ITERATOR_OTHER_TEMPLATE
+    requires(
         is_const >= other_const && std::is_copy_constructible_v<content_type>
-    )
-    ForwardIterator(const ITERATOR_OTHER &);
+    ) ForwardIterator(const ITERATOR_OTHER &);
 
     /**
      * @brief Converting move constructor from a (possibly) more mutable
      *        iterator.
      */
-    ITERATOR_OTHER_TEMPLATE_COND(
+    ITERATOR_OTHER_TEMPLATE
+    requires(
         is_const >= other_const && std::is_move_constructible_v<content_type>
-    )
-    ForwardIterator(ITERATOR_OTHER &&);
+    ) ForwardIterator(ITERATOR_OTHER &&);
 
     /**
      * @brief Converting copy assignment from a (possibly) more mutable
      *        iterator.
      */
-    ITERATOR_OTHER_TEMPLATE_COND(
+    ITERATOR_OTHER_TEMPLATE
+    requires(
         is_const >= other_const && std::is_copy_assignable_v<content_type>
-    )
-    ITERATOR &
+    ) ITERATOR &
     operator=(const ITERATOR_OTHER &) noexcept(HAS_NOEXCEPT_COPY(content_type));
 
     /**
      * @brief Converting move assignment from a (possibly) more mutable
      *        iterator.
      */
-    ITERATOR_OTHER_TEMPLATE_COND(
+    ITERATOR_OTHER_TEMPLATE
+    requires(
         is_const >= other_const && std::is_move_assignable_v<content_type>
-    )
-    ITERATOR &
+    ) ITERATOR &
     operator=(ITERATOR_OTHER &&) noexcept(HAS_NOEXCEPT_MOVE(content_type));
 
     ITERATOR_OTHER_TEMPLATE
@@ -155,11 +132,11 @@ ITERATOR_TEMPLATE class ForwardIterator {
     reference operator*() const noexcept;
     pointer operator->() const noexcept;
 
-    template <bool B = is_const, std::enable_if_t<!B>>
-    reference operator*() noexcept;
+    reference operator*() noexcept
+        requires(!is_const);
 
-    template <bool B = is_const, std::enable_if_t<!B>>
-    pointer operator->() noexcept;
+    pointer operator->() noexcept
+        requires(!is_const);
 
     content_type &get_content() noexcept;
     const content_type &get_content() const noexcept;
@@ -168,45 +145,41 @@ ITERATOR_TEMPLATE class ForwardIterator {
     content_type ct;
 };
 
-#undef ITERATOR_OTHER_TEMPLATE_COND
-#define ITERATOR_OTHER_TEMPLATE_COND(cond) \
-    template <bool other_const, std::enable_if_t<cond, int>>
-
 ITERATOR_TEMPLATE
 ITERATOR::ForwardIterator(content_type &&ct) noexcept(
     HAS_NOEXCEPT_MOVE(content_type)
 ) : ct(std::move(ct)) {}
 
 ITERATOR_TEMPLATE
-ITERATOR_OTHER_TEMPLATE_COND(
+ITERATOR_OTHER_TEMPLATE
+requires(
     is_const >= other_const && std::is_copy_constructible_v<content_type>
-)
-ITERATOR::ForwardIterator(const ITERATOR_OTHER &other) : ct(other.ct) {}
+) ITERATOR::ForwardIterator(const ITERATOR_OTHER &other) : ct(other.ct) {}
 
 ITERATOR_TEMPLATE
-ITERATOR_OTHER_TEMPLATE_COND(
+ITERATOR_OTHER_TEMPLATE
+requires(
     is_const >= other_const && std::is_move_constructible_v<content_type>
-)
-ITERATOR::ForwardIterator(ITERATOR_OTHER &&other) : ct(other.ct) {}
+) ITERATOR::ForwardIterator(ITERATOR_OTHER &&other) : ct(other.ct) {}
 
 ITERATOR_TEMPLATE
-ITERATOR_OTHER_TEMPLATE_COND(
+ITERATOR_OTHER_TEMPLATE
+requires(
     is_const >= other_const && std::is_copy_assignable_v<content_type>
-)
-ITERATOR &ITERATOR::operator=(const ITERATOR_OTHER &other) noexcept(
-    HAS_NOEXCEPT_COPY(content_type)
-) {
+) ITERATOR
+    &ITERATOR::operator=(const ITERATOR_OTHER
+                         & other) noexcept(HAS_NOEXCEPT_COPY(content_type)) {
     ct = other.ct;
     return *this;
 }
 
 ITERATOR_TEMPLATE
-ITERATOR_OTHER_TEMPLATE_COND(
+ITERATOR_OTHER_TEMPLATE
+requires(
     is_const >= other_const && std::is_move_assignable_v<content_type>
-)
-ITERATOR &ITERATOR::operator=(ITERATOR_OTHER &&other) noexcept(
-    HAS_NOEXCEPT_MOVE(content_type)
-) {
+) ITERATOR
+    &ITERATOR::operator=(ITERATOR_OTHER
+                         && other) noexcept(HAS_NOEXCEPT_MOVE(content_type)) {
     ct = std::move(other.ct);
     return *this;
 }
@@ -247,14 +220,16 @@ typename ITERATOR::pointer ITERATOR::operator->() const noexcept {
 }
 
 ITERATOR_TEMPLATE
-template <bool B, std::enable_if_t<!B>>
-typename ITERATOR::reference ITERATOR::operator*() noexcept {
+typename ITERATOR::reference ITERATOR::operator*() noexcept
+    requires(!is_const)
+{
     return ct.get();
 }
 
 ITERATOR_TEMPLATE
-template <bool B, std::enable_if_t<!B>>
-typename ITERATOR::pointer ITERATOR::operator->() noexcept {
+typename ITERATOR::pointer ITERATOR::operator->() noexcept
+    requires(!is_const)
+{
     return &(ct.get());
 }
 
@@ -266,7 +241,6 @@ const content_type &ITERATOR::get_content() const noexcept { return ct; }
 
 #undef ITERATOR_TEMPLATE
 #undef ITERATOR_OTHER_TEMPLATE
-#undef ITERATOR_OTHER_TEMPLATE_COND
 #undef ITERATOR
 #undef ITERATOR_OTHER
 
