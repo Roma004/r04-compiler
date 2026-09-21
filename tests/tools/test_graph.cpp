@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <catch2/catch_all.hpp>
 
+#include <catch2/catch_test_macros.hpp>
 #include <random>
 #include <set>
 #include <stdexcept>
@@ -48,6 +49,22 @@ TEST_CASE("graph node insertion", "[graph]") {
     // Without edges nothing is traversed
     REQUIRE(traverse(g, n1).empty());
     REQUIRE(traverse(g, n2).empty());
+
+    g.assert_integrity();
+}
+
+TEST_CASE("graph with empty types works", "[graph]") {
+    tools::orgraph_t<tools::empty, tools::empty> g;
+    auto a = g.emplace_node();
+    auto b = g.emplace_node();
+    auto e = g.emplace_edge(a, b);
+
+    REQUIRE(e->source() == a);
+    REQUIRE(e->target() == b);
+
+    STATIC_REQUIRE(std::is_same_v<decltype(a->get_data()), tools::empty &>);
+    STATIC_REQUIRE(std::is_same_v<decltype(b->get_data()), tools::empty &>);
+    STATIC_REQUIRE(std::is_same_v<decltype(e->get_data()), tools::empty &>);
 
     g.assert_integrity();
 }

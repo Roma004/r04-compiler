@@ -28,6 +28,8 @@ concept EdgeCtx = requires {
     std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>;
 };
 
+struct empty {};
+
 #define GRAPH_TEMPLATE template <NodeCtx node_data, EdgeCtx edge_data>
 #define GRAPH_ARGS     node_data, edge_data
 #define GRAPH          orgraph_t<GRAPH_ARGS>
@@ -222,7 +224,17 @@ GRAPH_TEMPLATE struct edge_t {
     using node_iter = node_iterator<GRAPH_ARGS>;
 
     template <typename... Args>
-        requires std::constructible_from<edge_data, Args...>
+        requires(
+            std::constructible_from<edge_data, Args...>
+            && !std::is_same_v<edge_data, empty>
+        )
+    edge_t(node_iter source, node_iter target, Args &&...args);
+
+    template <typename... Args>
+        requires(
+            std::constructible_from<edge_data, Args...>
+            && std::is_same_v<edge_data, empty>
+        )
     edge_t(node_iter source, node_iter target, Args &&...args);
 
     edge_data &get_data() noexcept;
@@ -249,7 +261,17 @@ GRAPH_TEMPLATE struct node_t {
     using edge_position = typename edges_list_t::const_iterator;
 
     template <typename... Args>
-        requires std::constructible_from<node_data, Args...>
+        requires(
+            std::constructible_from<node_data, Args...>
+            && !std::is_same_v<node_data, empty>
+        )
+    node_t(Args &&...args);
+
+    template <typename... Args>
+        requires(
+            std::constructible_from<node_data, Args...>
+            && std::is_same_v<node_data, empty>
+        )
     node_t(Args &&...args);
 
     node_data &get_data() noexcept;
@@ -281,10 +303,18 @@ namespace graph {
 
 GRAPH_TEMPLATE
 template <typename... Args>
-    requires std::constructible_from<edge_data, Args...>
+    requires(std::constructible_from<edge_data, Args...>
+             && !std::is_same_v<edge_data, empty>)
 GRAPH_EDGE::edge_t(node_iter source, node_iter target, Args &&...args) :
     data(std::forward<Args...>(args...)), source_node(source),
     target_node(target) {}
+
+GRAPH_TEMPLATE
+template <typename... Args>
+    requires(std::constructible_from<edge_data, Args...>
+             && std::is_same_v<edge_data, empty>)
+GRAPH_EDGE::edge_t(node_iter source, node_iter target, Args &&...args) :
+    source_node(source), target_node(target) {}
 
 GRAPH_TEMPLATE
 edge_data &GRAPH_EDGE::edge_t::get_data() noexcept { return data; }
@@ -324,9 +354,16 @@ namespace graph {
 
 GRAPH_TEMPLATE
 template <typename... Args>
-    requires std::constructible_from<node_data, Args...>
+    requires(std::constructible_from<node_data, Args...>
+             && !std::is_same_v<node_data, empty>)
 GRAPH_NODE::node_t(Args &&...args) :
     data(std::forward<Args &&...>(args...)), backward_list(), forward_list() {}
+
+GRAPH_TEMPLATE
+template <typename... Args>
+    requires(std::constructible_from<node_data, Args...>
+             && std::is_same_v<node_data, empty>)
+GRAPH_NODE::node_t(Args &&...args) : backward_list(), forward_list() {}
 
 GRAPH_TEMPLATE
 node_data &GRAPH_NODE::get_data() noexcept { return data; }
