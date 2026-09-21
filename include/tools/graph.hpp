@@ -135,6 +135,8 @@ class orgraph_t {
     /** @brief Remove the edge by it's iterator */
     void remove_edge(edge_iter);
 
+    size_t size() const noexcept;
+
     /**
      * @brief [DEBUG] Check, that graph is not broken
      * @throws std::runtime_error if something went wrong and graph became
@@ -721,6 +723,9 @@ GRAPH_TEMPLATE void GRAPH::assert_integrity() const {
             );
     }
 }
+
+GRAPH_TEMPLATE
+size_t GRAPH::size() const noexcept { return nodes_list.size(); }
 
 #undef GRAPH_TEMPLATE
 #undef GRAPH
