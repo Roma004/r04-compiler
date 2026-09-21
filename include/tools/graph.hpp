@@ -4,6 +4,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <ostream>
 #include <set>
 #include <stddef.h>
 #include <stdexcept>
@@ -197,6 +198,17 @@ class orgraph_t {
             handle
     ) const;
 
+    /**
+     * @brief Print graph into the stream with DOT format
+     *
+     * Gets node_data and edge_data converting functions, which should return
+     * a vector of node or edge attributes.
+     * */
+    template <typename NodeConv, typename EdgeConv>
+        requires helpers::DOTConverter<node_data, NodeConv>
+              && helpers::DOTConverter<edge_data, EdgeConv>
+    void to_dot(std::ostream &out, NodeConv nc, EdgeConv ec) const noexcept;
+
   private:
     graph::node_container_t<GRAPH_ARGS> nodes_list;
     graph::edge_container_t<GRAPH_ARGS> edges_list;
@@ -356,7 +368,7 @@ std::string GRAPH_NODE::repr() const noexcept {
     } else if constexpr (std::is_convertible_v<node_data, std::string_view>) {
         return std::string(data);
     } else {
-        return "edge[0x" + std::to_string((uintptr_t)&data) + "]";
+        return "node[0x" + std::to_string((uintptr_t)&data) + "]";
     }
 }
 
@@ -592,6 +604,37 @@ void GRAPH::traverse(
             );
         }
     );
+}
+
+GRAPH_TEMPLATE
+template <typename NodeConv, typename EdgeConv>
+    requires helpers::DOTConverter<node_data, NodeConv>
+          && helpers::DOTConverter<edge_data, EdgeConv>
+void GRAPH::to_dot(std::ostream &out, NodeConv nc, EdgeConv ec) const noexcept {
+    std::map<const node_data *, std::string> node_names;
+
+    out << "digraph {\n";
+
+    size_t node_id = 0;
+    for (auto &n : nodes_list) {
+        auto node_name = "N" + std::to_string(node_id++);
+        node_names[&n.get_data()] = node_name;
+        out << "  " << node_name << " [";
+        for (auto &&[key, value] : nc(n.get_data())) {
+            out << std::format("{}=\"{}\",", key, value);
+        }
+        out << "]\n";
+    }
+    for (auto &e : edges_list) {
+        out << "  " << node_names[&e.source()->get_data()] << " -> "
+            << node_names[&e.target()->get_data()] << " [";
+        for (auto &&[key, value] : ec(e.get_data())) {
+            out << std::format("{}=\"{}\",", key, value);
+        }
+        out << "]\n";
+    }
+
+    out << "}\n";
 }
 
 GRAPH_TEMPLATE void GRAPH::assert_integrity() const {

@@ -3,7 +3,7 @@
 #include <concepts>
 #include <format>
 #include <string>
-#include <string_view>
+#include <vector>
 
 #define HAS_NOEXCEPT_COPY(T)    std::is_nothrow_copy_constructible_v<T>
 #define HAS_NOEXCEPT_MOVE(T)    std::is_nothrow_move_constructible_v<T>
@@ -15,12 +15,19 @@ using std::to_string;
 
 template <typename T>
 concept Repersentable = requires(const T &obj) {
-    { obj.repr() } -> std::convertible_to<std::string_view>;
+    { obj.repr() } -> std::convertible_to<std::string>;
 };
 
 template <typename T>
 concept Stringifiable = requires(const T &obj) {
-    { to_string(obj) } -> std::convertible_to<std::string_view>;
+    { to_string(obj) } -> std::convertible_to<std::string>;
+};
+
+using DOTList = std::vector<std::pair<std::string, std::string>>;
+
+template <typename T, typename Conv>
+concept DOTConverter = requires(const Conv &c, const T &val) {
+    { c(val) } -> std::convertible_to<DOTList>;
 };
 
 } // namespace helpers
