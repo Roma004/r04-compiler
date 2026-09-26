@@ -1,0 +1,3 @@
+[submodule "lib/ctpg"]
+	path = lib/ctpg
+	url = https://github.com/Roma004/ctpg_runtime.git

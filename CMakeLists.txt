@@ -3,7 +3,13 @@ cmake_minimum_required(VERSION 3.10)
 project(r04-compiler LANGUAGES CXX)
 
 include_directories(include)
+include_directories(lib/ctpg/include)
+
+if (PROD)
+add_definitions("-O2 -s -g0 -std=c++20")
+else()
 add_definitions("-O0 -ggdb3 -std=c++20")
+endif()
 
 # tests
 find_package(Catch2 REQUIRED)
@@ -16,6 +22,42 @@ target_link_libraries(${ALL_TESTS} PRIVATE Catch2::Catch2WithMain)
 target_compile_options(${ALL_TESTS} PRIVATE --coverage)
 target_link_options(${ALL_TESTS} PRIVATE --coverage)
 add_test(NAME ${ALL_TESTS} COMMAND ${ALL_TESTS})
+
+add_library(ctpg INTERFACE)
+target_include_directories(ctpg INTERFACE
+    ${PROJECT_SOURCE_DIR}/lib/ctpg/include)
+add_library(ctpg::ctpg ALIAS ctpg)
+
+set(CTPG_GENERATOR_TEMPLATE
+    "${PROJECT_SOURCE_DIR}/lib/ctpg/cmake/ctpg-generator-main.cpp.in"
+    CACHE INTERNAL "")
+
+include(${PROJECT_SOURCE_DIR}/lib/ctpg/cmake/ctpg-parser-table.cmake)
+
+add_library(frontend_parser STATIC
+    src/frontend/parser.cpp
+    src/frontend/ast/types.cpp
+)
+target_compile_options(
+    frontend_parser PUBLIC
+    "-DCTPG_TABLE_FILE=\"frontend_parser_table.ctpg/frontend_parser_table.bin\""
+)
+
+target_include_directories(frontend_parser PUBLIC
+    ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(frontend_parser PUBLIC ctpg::ctpg)
+
+ctpg_add_parser_table(
+    TARGET          frontend_parser_table
+    HEADER          ${PROJECT_SOURCE_DIR}/include/frontend/parser.hpp
+    TABLE           frontend::parser::get_parse_table
+    SYMBOL          frontend_parser_table
+    NAMESPACE       frontend::parser
+    LINK_LIBRARIES  frontend_parser
+)
+
+add_executable(parser parse.cpp)
+target_link_libraries(parser PRIVATE frontend_parser)
 
 # compile commands
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")

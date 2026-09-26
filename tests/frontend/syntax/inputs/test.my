@@ -1,0 +1,25 @@
+uint64_t[10]*[0b11] sdf;
+
+const volatile uint64_t[10] *asd = 0x18 % c;
+
+uint8_t *get_result(uint16_t[4] inp, bool_t *is_normal);
+
+uint8_t *get_result1(uint16_t[4] inp);
+
+uint8_t *get_result2();
+
+uint32_t get_result3(uint32_t **ptr) {
+    if (ptr == 0) return (uint32_t)ptr;
+    else if (*ptr == 0) {
+        uint32_t res = (uint32_t)*ptr;
+        return *ptr;
+    } else if (!**ptr) {
+        **ptr = 1;
+        return **ptr;
+    } else for (uint8_t i = 0; i < *ptr; i = i + 1) {
+        *ptr[i] = get_result2();
+        if (i == 0) continue;
+        if (i % 100 == 0) break;
+        else if (i % 10 == 0) continue;
+    }
+}
