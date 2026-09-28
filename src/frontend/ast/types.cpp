@@ -144,34 +144,34 @@ Literal Literal::apply(std::string_view op) const {
 #undef APPLY
 
 TypeSpec::TypeSpec(std::string_view sv) : name(sv), attrs(0) {
-    if (sv == "void") {
+    if (sv == "void_t") {
         attrs |= INTEGRAL;
         size = 1;
-    } else if (sv == "bool") {
+    } else if (sv == "bool_t") {
         attrs |= INTEGRAL;
         size = 1;
-    } else if (sv == "u8") {
+    } else if (sv == "uint8_t") {
         attrs |= INTEGRAL;
         size = 1;
-    } else if (sv == "u16") {
+    } else if (sv == "uint16_t") {
         attrs |= INTEGRAL;
         size = 2;
-    } else if (sv == "u32") {
+    } else if (sv == "uint32_t") {
         attrs |= INTEGRAL;
         size = 4;
-    } else if (sv == "u64") {
+    } else if (sv == "uint64_t") {
         attrs |= INTEGRAL;
         size = 8;
-    } else if (sv == "i8") {
+    } else if (sv == "int8_t") {
         attrs |= INTEGRAL | SIGNED;
         size = 1;
-    } else if (sv == "i16") {
+    } else if (sv == "int16_t") {
         attrs |= INTEGRAL | SIGNED;
         size = 2;
-    } else if (sv == "i32") {
+    } else if (sv == "int32_t") {
         attrs |= INTEGRAL | SIGNED;
         size = 4;
-    } else if (sv == "i64") {
+    } else if (sv == "int64_t") {
         attrs |= INTEGRAL | SIGNED;
         size = 8;
     }

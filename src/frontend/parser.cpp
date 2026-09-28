@@ -41,8 +41,11 @@ namespace term {
 constexpr char id_pattern[] = "[A-Za-z_][0-9A-Za-z_]*";
 regex_term<id_pattern> id("id");
 
+constexpr char type_id_pattern[] = "[A-Za-z_][0-9A-Za-z_]*_t";
+regex_term<type_id_pattern> type_id("type_id");
+
 constexpr char num_pattern[] =
-    "[1-9][0-9]*|0[0-7]*|0[xX][0-9a-fA-F]+|0[bB][01]+";
+    "[1-9][0-9]*|0[xX][0-9a-fA-F]+|0[bB][01]+|0[0-7]*";
 regex_term<num_pattern> num_literal("num_literal");
 
 DECL_KEYWORD(if, "if");
@@ -66,11 +69,12 @@ enum prior {
     MATH1,
     UNARY,
     DEREF,
+    SUBSCRIPT,
     EDGE,
 };
 
 DECL_SIGN_ASSOC(assign, "=", prior::ASSIGN, rtol);
-DECL_SIGN_ASSOC(deref, "@", prior::DEREF, ltor);
+DECL_SIGN_ASSOC(deref, "*", prior::DEREF, ltor);
 DECL_SIGN_ASSOC(addr, "&", prior::DEREF, ltor);
 DECL_SIGN_ASSOC(edge, "->", prior::EDGE, ltor);
 DECL_SIGN_ASSOC(dot, ".", prior::EDGE, ltor);
@@ -161,9 +165,10 @@ expr_t unary_operation(ParserContext &ctx, std::string_view op, expr_t r) {
 // clang-format off
 ctpg::parser p(program,
 terms(
-    term::id,
-    term::num_literal,
     KEYWORDS(const, volatile, if, else, while, return),
+    term::num_literal,
+    term::type_id,
+    term::id,
     SIGNS(assign, deref, addr, edge, dot),
     "||", "&&", "|", "^", "&", "==", "!=", "<", ">", "<=", ">=", ">>", "<<",
     "+", "-", "*", "/", "%", "~", "!",
@@ -211,7 +216,7 @@ rules(
      * All subscript and dereference operators are treated as array or
      * pointer dimensions of that type.
      */
-    type_spec(term::id) >>=
+    type_spec(term::type_id) >>=
         [](ParserContext &ctx, auto sv){
             return create_node(TypeSpec, sv2loc(sv), sv);
         },
@@ -224,7 +229,7 @@ rules(
     type_spec(KWD(volatile), type_spec) >=
         [](skip, type_spec_t type) {
             // TODO: if already add, insert warning
-            type->get_data().get<types::TypeSpec>().add_const();
+            type->get_data().get<types::TypeSpec>().add_volatile();
             return type;
         },
     type_spec(type_spec, SGN(deref)) >>=

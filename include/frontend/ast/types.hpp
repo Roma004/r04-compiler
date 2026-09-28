@@ -136,7 +136,7 @@ inline std::string to_string(const Subscript &) { return "subscript"; }
 inline std::string to_string(const Deref &) { return "deref"; }
 inline std::string to_string(const Addr &) { return "addr"; }
 inline std::string to_string(const Get &g) { return "get: " + g.name; }
-inline std::string to_string(const BinaryOp &g) { return "banary " + g.op; }
+inline std::string to_string(const BinaryOp &g) { return "binary " + g.op; }
 inline std::string to_string(const UnaryOp &g) { return "unary: " + g.op; }
 inline std::string to_string(const TypeSpec &g) {
     std::string res;
