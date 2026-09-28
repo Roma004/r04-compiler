@@ -1,5 +1,7 @@
 #pragma once
 
+#include <concepts>
+#include <utility>
 #include <variant>
 
 #include <frontend/ast/source_map.hpp>
@@ -8,46 +10,36 @@
 
 namespace frontend::ast {
 
-struct TypeInfo {
-    enum {
-        SIGNED = 1 << 0,
-        CONST = 1 << 1,
-        VOLATILE = 1 << 2,
-    };
-    std::string type;
-    unsigned attrs = 0;
-
-    TypeInfo(std::string &&type) : type(std::move(type)) {}
-};
-
-struct TypeDecl {
-    std::string name;
-    SourceLocation loc;
-};
-
-struct VarDecl {
-    TypeInfo type;
-    std::string name;
-    SourceLocation loc;
-};
-
 struct node_t {
     template <typename T>
-    static node_t from_sv(std::string_view sv, SourceLocation &&loc) {
-        return node_t{.val = T(sv), .loc = std::move(loc)};
+    node_t(const SourceLocation &loc, T &&val) :
+        val(std::move(val)), loc(loc) {}
+
+    template <typename T, typename... Args>
+        requires std::constructible_from<T, Args...>
+    static node_t create(const SourceLocation &loc, Args &&...args) {
+        return node_t(loc, T(std::forward<Args &&>(args)...));
     }
 
-    template <typename T> static node_t from_loc(const SourceLocation &loc) {
-        return node_t{.val = T(), .loc = loc};
-    }
+    static node_t create_root() { return node_t({}, types::Root{}); }
+
+    template <typename T> T &get() { return std::get<T>(val); }
+    template <typename T> const T &get() const { return std::get<T>(val); }
 
     std::variant<
         types::Root,
         types::Literal,
         types::ID,
+        types::BinaryOp,
+        types::UnaryOp,
         types::Subscript,
         types::Deref,
         types::Addr,
+        types::Cast,
+        types::Declare,
+        types::TypeSpec,
+        types::Pointer,
+        types::Assign,
         types::Get>
         val;
     SourceLocation loc = {};
