@@ -30,6 +30,21 @@ concept DOTConverter = requires(const Conv &c, const T &val) {
     { c(val) } -> std::convertible_to<DOTList>;
 };
 
+inline std::string dot_escape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + s.size() / 8);
+    for (char c : s) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '"':  out += "\\\""; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            default:   out += c;      break;
+        }
+    }
+    return out;
+}
+
 } // namespace helpers
 
 namespace std {

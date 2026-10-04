@@ -209,9 +209,7 @@ class orgraph_t {
      * a vector of node or edge attributes.
      * */
     template <typename NodeConv, typename EdgeConv>
-        requires helpers::DOTConverter<node_data, NodeConv>
-              && helpers::DOTConverter<edge_data, EdgeConv>
-    void to_dot(std::ostream &out, NodeConv nc, EdgeConv ec) const noexcept;
+    void to_dot(std::ostream &out, NodeConv nc, EdgeConv ec) const;
 
   private:
     graph::node_container_t<GRAPH_ARGS> nodes_list;
@@ -647,28 +645,28 @@ void GRAPH::traverse(
 
 GRAPH_TEMPLATE
 template <typename NodeConv, typename EdgeConv>
-    requires helpers::DOTConverter<node_data, NodeConv>
-          && helpers::DOTConverter<edge_data, EdgeConv>
-void GRAPH::to_dot(std::ostream &out, NodeConv nc, EdgeConv ec) const noexcept {
+void GRAPH::to_dot(std::ostream &out, NodeConv nc, EdgeConv ec) const {
+    static_assert(helpers::DOTConverter<typename GRAPH::node_iter, NodeConv>);
+    static_assert(helpers::DOTConverter<typename GRAPH::edge_iter, EdgeConv>);
     std::map<const node_data *, std::string> node_names;
 
     out << "digraph {\n";
 
     size_t node_id = 0;
-    for (auto &n : nodes_list) {
+    for (auto it = nodes_list.begin(); it != nodes_list.end(); ++it) {
         auto node_name = "N" + std::to_string(node_id++);
-        node_names[&n.get_data()] = node_name;
+        node_names[&it->get_data()] = node_name;
         out << "  " << node_name << " [";
-        for (auto &&[key, value] : nc(n.get_data())) {
-            out << std::format("{}=\"{}\",", key, value);
+        for (auto &&[key, value] : nc(it)) {
+            out << std::format("{}=\"{}\",", key, helpers::dot_escape(value));
         }
         out << "]\n";
     }
-    for (auto &e : edges_list) {
-        out << "  " << node_names[&e.source()->get_data()] << " -> "
-            << node_names[&e.target()->get_data()] << " [";
-        for (auto &&[key, value] : ec(e.get_data())) {
-            out << std::format("{}=\"{}\",", key, value);
+    for (auto it = edges_list.begin(); it != edges_list.end(); ++it) {
+        out << "  " << node_names[&it->source()->get_data()] << " -> "
+            << node_names[&it->target()->get_data()] << " [";
+        for (auto &&[key, value] : ec(it)) {
+            out << std::format("{}=\"{}\",", key, helpers::dot_escape(value));
         }
         out << "]\n";
     }
