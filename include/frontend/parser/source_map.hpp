@@ -4,7 +4,7 @@
 
 #include <tools/tree.hpp>
 
-namespace frontend {
+namespace frontend::parser {
 
 struct SourceLocation {
     unsigned line;

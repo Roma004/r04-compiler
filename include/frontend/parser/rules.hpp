@@ -1,31 +1,9 @@
 #pragma once
 
 #include "frontend/ast/types.hpp"
-#include <frontend/ast/ast.hpp>
-#include <frontend/ast/source_map.hpp>
-#include <optional>
-#include <string_view>
-#include <vector>
-
-#include <ctpg/parse-table.hpp>
+#include <frontend/parser/context.hpp>
 
 namespace frontend::parser {
-
-struct ParserContext {
-    std::vector<ErrorMessage> errors;
-    SourceMap src_map;
-    ast::Ast ast;
-
-    ParserContext(std::string_view input) : src_map(input) {}
-
-    void insert_error(const std::string &msg, std::string_view locate) {
-        errors.emplace_back(msg, src_map.locate(locate));
-    }
-
-    bool parse();
-};
-
-ctpg::parse_table &get_parse_table() noexcept;
 
 using node = ast::Ast::node_iter;
 using list = std::vector<node>;
@@ -77,9 +55,7 @@ inline node make_fn_decl(CTX, node decl, char, list &&args, char) {
     auto res = create_node<types::Function>(ctx, decl->get_data().loc);
     ctx.ast.emplace_edge(res, decl, types::Function::DECL);
     int idx = types::Function::ARG0;
-    for (auto arg : args) {
-        ctx.ast.emplace_edge(res, arg, idx++);
-    }
+    for (auto arg : args) { ctx.ast.emplace_edge(res, arg, idx++); }
     return res;
 }
 
@@ -158,9 +134,7 @@ inline node make_call(CTX, node callee, char, list &&args, char) {
     auto res = create_node<types::Call>(ctx, callee->get_data().loc);
     ctx.ast.emplace_edge(res, callee, types::Call::EXPR);
     int idx = types::Call::ARG0;
-    for (auto arg : args) {
-        ctx.ast.emplace_edge(res, arg, idx++);
-    }
+    for (auto arg : args) { ctx.ast.emplace_edge(res, arg, idx++); }
     return res;
 }
 
@@ -244,7 +218,7 @@ inline node make_binary_op(ParserContext &ctx, node l, str op, node r) {
 }
 
 inline node make_binary_assign(ParserContext &ctx, node l, str op, node r) {
-    auto operation = make_binary_op(ctx, l, op.substr(0, op.size()-1), r);
+    auto operation = make_binary_op(ctx, l, op.substr(0, op.size() - 1), r);
     auto res = ctx.ast.emplace_node(l->get_data());
     return make_assign(ctx, res, op, operation);
 }
@@ -255,4 +229,4 @@ inline node make_unary_op(ParserContext &ctx, str op, node r) {
     return res;
 }
 
-} // namespace frontend::parser
+}; // namespace frontend::parser

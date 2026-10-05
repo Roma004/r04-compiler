@@ -49,7 +49,7 @@ target_link_libraries(frontend_parser PUBLIC ctpg::ctpg)
 
 ctpg_add_parser_table(
     TARGET          frontend_parser_table
-    HEADER          ${PROJECT_SOURCE_DIR}/include/frontend/parser.hpp
+    HEADER          ${PROJECT_SOURCE_DIR}/include/frontend/parser/context.hpp
     TABLE           frontend::parser::get_parse_table
     SYMBOL          frontend_parser_table
     NAMESPACE       frontend::parser

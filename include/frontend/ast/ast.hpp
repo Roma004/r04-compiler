@@ -4,20 +4,24 @@
 #include <utility>
 #include <variant>
 
-#include <frontend/ast/source_map.hpp>
 #include <frontend/ast/types.hpp>
+#include <frontend/parser/source_map.hpp>
 #include <tools/tree.hpp>
+
+namespace frontend::parser {
+struct ParserContext;
+};
 
 namespace frontend::ast {
 
 struct node_t {
     template <typename T>
-    node_t(const SourceLocation &loc, T &&val) :
+    node_t(const parser::SourceLocation &loc, T &&val) :
         val(std::move(val)), loc(loc) {}
 
     template <typename T, typename... Args>
         requires std::constructible_from<T, Args...>
-    static node_t create(const SourceLocation &loc, Args &&...args) {
+    static node_t create(const parser::SourceLocation &loc, Args &&...args) {
         return node_t(loc, T(std::forward<Args &&>(args)...));
     }
 
@@ -25,6 +29,8 @@ struct node_t {
 
     template <typename T> T &get() { return std::get<T>(val); }
     template <typename T> const T &get() const { return std::get<T>(val); }
+
+    template <typename T> bool is() { return std::holds_alternative<T>(val); }
 
     std::variant<
         types::Root,
@@ -54,7 +60,7 @@ struct node_t {
         types::Continue,
         types::Get>
         val;
-    SourceLocation loc = {};
+    parser::SourceLocation loc = {};
 };
 
 struct edge_t {
@@ -69,6 +75,8 @@ class Ast : public ast_tree_t {
     using edge_iter = tree_t::edge_iter;
     using const_node_iter = tree_t::const_node_iter;
     using const_edge_iter = tree_t::const_edge_iter;
+
+    bool check_semantics(parser::ParserContext &);
 };
 
 inline std::string to_string(const Ast::const_node_iter &node) {

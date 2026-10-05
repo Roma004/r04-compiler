@@ -1,8 +1,8 @@
-#include "frontend/ast/ast.hpp"
 #include <fstream>
 #include <iostream>
 
-#include <frontend/parser.hpp>
+#include <frontend/ast/ast.hpp>
+#include <frontend/parser/context.hpp>
 
 int main(void) {
     using std::to_string;

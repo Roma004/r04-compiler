@@ -1,14 +1,17 @@
-#include "frontend/parser.hpp"
-#include "ctpg/parse-table.hpp"
-#include "frontend/ast/source_map.hpp"
-#include "frontend/ast/types.hpp"
-#include <ctpg/ctpg.hpp>
 #include <iostream>
 #include <optional>
+
+#include "frontend/ast/types.hpp"
+#include "frontend/parser/context.hpp"
+#include "frontend/parser/rules.hpp"
+#include "frontend/parser/source_map.hpp"
 
 #ifndef CTPG_TABLE_FILE
 #define CTPG_TABLE_FILE "frontend_parser_table_data.bin"
 #endif
+
+#include <ctpg/ctpg.hpp>
+#include <ctpg/parse-table.hpp>
 #include <ctpg/parse-table/mapped.hpp>
 
 #define DECL_REGEX_TERM(_name, regex_str)         \
@@ -70,7 +73,6 @@ enum prior {
     EDGE,
 };
 
-
 DECL_REGEX_TERM(str_literal, R"regex("([^"\\]|\\.)*")regex");
 DECL_REGEX_TERM(chr_literal, R"regex('([^'\\]|\\.)*')regex");
 DECL_REGEX_TERM(id, "[A-Za-z_][0-9A-Za-z_]*");
@@ -117,7 +119,6 @@ DECL_LIST_NTERM(for_init);
 DECL_LIST_NTERM(for_init_ne);
 DECL_LIST_NTERM(for_step);
 DECL_LIST_NTERM(for_step_ne);
-
 
 // clang-format off
 ctpg::parser p(program,
