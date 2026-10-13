@@ -4,6 +4,7 @@
 #include <cassert>
 #include <frontend/ast/ast.hpp>
 #include <frontend/parser/context.hpp>
+#include <string_view>
 #include <vector>
 
 namespace frontend::ast {
@@ -76,6 +77,7 @@ struct context {
     parser::ParserContext &pctx;
     std::vector<ctx_layer> var_ctx;
     std::vector<std::string> functions;
+    std::map<std::string, types::TypeSpec *> types;
 
     int find_layer(const node_t &of_block) const;
     int push_layer(const node_t &of_block, bool is_cycle);
@@ -88,30 +90,73 @@ struct context {
     bool has_name(std::string_view name);
     bool insert_name(std::string_view name);
 
+    types::TypeSpec *get_type(const std::string &name);
+
     bool insert_function(std::string_view name);
     bool is_function_defined(std::string_view name);
 
     void insert_error(const std::string &msg, const loc_t &loc);
-    void define_name(node_t n);
-    void define_function(node_t n);
+    void define_name(node n);
+    void define_function(node_t &n);
+    bool define_type(node type);
 
     bool check_global_names();
 
     bool check_function(node fn);
+    bool check_structure(node fn);
     bool check_block(node blk);
     bool check_stmt(node stmt);
     bool check_expr(node expr);
+
+    bool check_type_exists(node type);
 };
 
-void context::define_name(node_t n) {
+bool context::define_type(node n) {
+    auto &data = n->get_data();
+    assert(data.is<types::Structure>());
+    auto &ts = get_node_data<types::TypeSpec>(n, types::Structure::TYPE);
+    if (get_type(ts.name)) {
+        insert_error("redefinition of type " + ts.name, data.loc);
+        return false;
+    }
+    size_t size = 0;
+    for (auto e : n->forward_edges()) {
+        if (e->get_data().data <= types::Structure::FIELD0) continue;
+        assert(e->target()->get_data().is<types::Declare>());
+        node member_type = get_node(e->target(), types::Declare::TYPE);
+        if (!check_type_exists(member_type)) return false;
+        size += member_type->get_data().get<types::TypeSpec>().size;
+    }
+    ts.size = size;
+    types[ts.name] = &ts;
+    return true;
+}
+
+types::TypeSpec *context::get_type(const std::string &name) {
+    if (types.find(name) == types.end()) return nullptr;
+    return types[name];
+}
+
+bool context::check_type_exists(node type) {
+    std::string &name = type->get_data().get<types::TypeSpec>().name;
+    if (!get_type(name)) {
+        insert_error("type " + name + " is not defined", type->get_data().loc);
+        return false;
+    }
+    return true;
+}
+
+void context::define_name(node nd) {
+    node_t &n = nd->get_data();
     assert(n.is<types::Declare>());
     auto &name = n.get<types::Declare>().name;
+    check_type_exists(get_node(nd, types::Declare::TYPE));
     if (!insert_name(name)) {
         insert_error(std::format("redefinition of name `{}`", name), n.loc);
     }
 }
 
-void context::define_function(node_t n) {
+void context::define_function(node_t &n) {
     assert(n.is<types::Declare>());
     auto &name = n.get<types::Declare>().name;
     if (!insert_function(name)) {
@@ -177,6 +222,11 @@ bool context::insert_name(std::string_view name) {
     return true;
 }
 
+bool context::check_structure(node st) {
+    // check for declarations in block
+    assert(st->get_data().is<types::Structure>());
+}
+
 bool context::check_global_names() {
     Ast &ast = pctx.ast;
     node root = ast.get_root();
@@ -189,9 +239,11 @@ bool context::check_global_names() {
         node_t &d = stmt->get_data();
 
         if (d.is<types::Declare>()) {
-            define_name(d);
+            define_name(stmt);
         } else if (d.is<types::Assign>()) {
-            define_name(get_node(stmt, types::Assign::LEFT)->get_data());
+            define_name(get_node(stmt, types::Assign::LEFT));
+        } else if (d.is<types::Structure>()) {
+            define_type(stmt);
         } else if (d.is<types::Function>()) {
             check_function(stmt);
         } else {
@@ -208,7 +260,7 @@ bool context::check_function(node fn) {
     push_layer(fn->get_data(), /* is_cycle */ false);
     for (edge e : fn->forward_edges()) {
         if (e->get_data().data >= types::Function::ARG0)
-            define_name(e->target()->get_data());
+            define_name(e->target());
     }
 
     auto body_it = find_edge(fn, types::Function::BODY);
@@ -231,14 +283,14 @@ bool context::check_stmt(node stmt) {
     if (d.is<types::Block>()) { return check_block(stmt); }
 
     if (d.is<types::Declare>()) {
-        define_name(d);
+        define_name(stmt);
         return true;
     }
 
     if (d.is<types::Assign>()) {
         check_expr(get_node(stmt, types::Assign::RIGHT));
         auto l = get_node(stmt, types::Assign::LEFT);
-        if (l->get_data().is<types::Declare>()) define_name(l->get_data());
+        if (l->get_data().is<types::Declare>()) define_name(l);
         else check_expr(l);
         return true;
     }

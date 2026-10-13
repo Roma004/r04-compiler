@@ -34,10 +34,8 @@ set(CTPG_GENERATOR_TEMPLATE
 
 include(${PROJECT_SOURCE_DIR}/lib/ctpg/cmake/ctpg-parser-table.cmake)
 
-add_library(frontend_parser STATIC
-    src/frontend/parser.cpp
-    src/frontend/ast/types.cpp
-)
+file(GLOB_RECURSE SRC_FILES "${PROJECT_SOURCE_DIR}/src/**/*.cpp")
+add_library(frontend_parser STATIC ${SRC_FILES})
 target_compile_options(
     frontend_parser PUBLIC
     "-DCTPG_TABLE_FILE=\"frontend_parser_table.ctpg/frontend_parser_table.bin\""

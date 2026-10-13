@@ -59,6 +59,20 @@ inline node make_fn_decl(CTX, node decl, char, list &&args, char) {
     return res;
 }
 
+inline node make_struct_def(CTX, str sv, str id) {
+    auto type = create_node<types::TypeSpec>(ctx, sv2loc(id), id);
+    auto res = create_node<types::Structure>(ctx, sv2loc(id));
+    ctx.ast.emplace_edge(res, type, types::Structure::TYPE);
+    return res;
+}
+
+inline node make_struct_decl(CTX, str sv, str id, char, list &&fields, char) {
+    auto def = make_struct_def(ctx, sv, id);
+    int idx = types::Structure::FIELD0;
+    for (auto field : fields) { ctx.ast.emplace_edge(def, field, idx++); }
+    return def;
+}
+
 inline node make_block(CTX, str sv, list &&lst, char) {
     auto res = create_node<types::Block>(ctx, sv2loc(sv));
     for (auto stmt : lst) {

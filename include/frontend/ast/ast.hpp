@@ -58,6 +58,7 @@ struct node_t {
         types::Block,
         types::Break,
         types::Continue,
+        types::Structure,
         types::Get>
         val;
     parser::SourceLocation loc = {};

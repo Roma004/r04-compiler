@@ -4,18 +4,27 @@
 #include <frontend/ast/ast.hpp>
 #include <frontend/parser/context.hpp>
 
-int main(void) {
+int main(int argc, char **argv) {
     using std::to_string;
+
+    if (argc != 2) {
+        std::cout << "usage: " << argv[0] << " <filename>" << std::endl;
+        return 1;
+    }
+
+    std::ifstream fin;
+    fin.open(argv[1]);
+
     std::string input = "";
     std::string rd = "";
-    while (std::getline(std::cin, rd)) input += rd + '\n';
+    while (std::getline(fin, rd)) input += rd + '\n';
     std::fstream fout;
 
     frontend::parser::ParserContext ctx(input);
 
     if (!ctx.parse()) std::cerr << "Invalid input!" << std::endl;
 
-    if (!ctx.errors.empty()) {
+    if (!ctx.ast.check_semantics(ctx)) {
         for (auto &msg : ctx.errors) {
             std::cerr << std::format(
                 "Syntax Error: `{}` at: {}:{}",

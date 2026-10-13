@@ -149,9 +149,12 @@ struct Assign {
     EDGE_NAMES(LEFT, RIGHT);
 };
 
-/** child 0 is function name and type declaration. others are arguments */
 struct Function {
     EDGE_NAMES(DECL, BODY, ARG0);
+};
+
+struct Structure {
+    EDGE_NAMES(TYPE, FIELD0);
 };
 
 /** childs are statements */
@@ -221,6 +224,7 @@ inline std::string to_string(const Cast &d) { return "cast"; }
 inline std::string to_string(const Pointer &d) { return "ptr"; }
 inline std::string to_string(const Assign &d) { return "="; }
 inline std::string to_string(const Function &d) { return "function"; }
+inline std::string to_string(const Structure &d) { return "struct"; }
 inline std::string to_string(const If &) { return "if"; }
 inline std::string to_string(const For &) { return "for"; }
 inline std::string to_string(const ForInit &) { return "init"; }
@@ -275,6 +279,10 @@ template <typename T> std::string edge_data_to_string(int data) {
         throw bad();
     } else if constexpr (requires { T::DIM0; }) {
         if (data >= T::DIM0) return "dim" + std::to_string(data - T::DIM0);
+        throw bad();
+    } else if constexpr (requires { T::TYPE, T::FIELD0; }) {
+        if (data == T::TYPE) return "type";
+        if (data >= T::FIELD0) return "field" + std::to_string(data - T::FIELD0);
         throw bad();
     } else if constexpr (requires { T::STMT0; }) {
         if (data >= T::STMT0) return "stmt" + std::to_string(data - T::STMT0);

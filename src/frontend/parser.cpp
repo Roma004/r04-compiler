@@ -46,6 +46,14 @@
     nterm(nterm##_ne)                      >=  _e1, \
     nterm##_ne(of_nterm)                   >= create_list, \
     nterm##_ne(nterm##_ne, sep, of_nterm)  >= push_back<1, 3>{}
+
+#define SEQUENCE_OF(nterm, of_nterm)             \
+    nterm()                >>= create<list>{},   \
+    nterm(nterm, of_nterm)  >= push_back<1, 2>{} \
+
+#define SEQUENCE_OF_SEP(nterm, of_nterm, sep)             \
+    nterm()                >>= create<list>{},   \
+    nterm(nterm, of_nterm, sep)  >= push_back<1, 2>{} \
 // clang-format on
 
 namespace frontend::parser {
@@ -89,6 +97,7 @@ DECL_KEYWORD(const);
 DECL_KEYWORD(volatile);
 DECL_KEYWORD(break);
 DECL_KEYWORD(continue);
+DECL_KEYWORD(struct);
 
 DECL_SIGN_ASSOC(assign, "=", prior::ASSIGN, rtol);
 DECL_SIGN_ASSOC(deref, "*", prior::DEREF, ltor);
@@ -108,6 +117,8 @@ DECL_NODE_NTERM(type_spec);
 DECL_NODE_NTERM(decl);
 DECL_NODE_NTERM(decl_assign);
 DECL_NODE_NTERM(decl_function);
+DECL_NODE_NTERM(decl_struct);
+DECL_NODE_NTERM(struct_block);
 DECL_NTERM(for_cond, std::optional<node>);
 
 DECL_LIST_NTERM(call_args);
@@ -119,11 +130,12 @@ DECL_LIST_NTERM(for_init);
 DECL_LIST_NTERM(for_init_ne);
 DECL_LIST_NTERM(for_step);
 DECL_LIST_NTERM(for_step_ne);
+DECL_LIST_NTERM(struct_fields);
 
 // clang-format off
 ctpg::parser p(program,
 terms(
-    KEYWORDS(const, volatile, if, else, for, return, break, continue),
+    KEYWORDS(const, volatile, if, else, for, return, break, continue, struct),
     term::chr_literal,
     term::str_literal,
     term::num_literal,
@@ -138,7 +150,8 @@ terms(
 nterms(
     program, global_stmt, expr, type_spec, decl, decl_list, decl_list_ne,
     decl_function, decl_assign, block, stmt_list, stmt, call_args, expr_assign,
-    call_args_ne, for_init, for_init_ne, for_cond, for_step, for_step_ne
+    call_args_ne, for_init, for_init_ne, for_cond, for_step, for_step_ne,
+    decl_struct, struct_block, struct_fields
 ),
 rules(
     /** program is list of global statements */
@@ -152,9 +165,11 @@ rules(
      * - declaration of function
      * - declaration of function with body
      */
-    global_stmt(decl_assign, ';')      >= _e1,
-    global_stmt(decl_function, ';')    >= _e1,
-    global_stmt(decl_function, block) >>= connect_with_body,
+    global_stmt(decl_assign, ';')           >= _e1,
+    global_stmt(decl_function, ';')         >= _e1,
+    global_stmt(decl_struct, ';')           >= _e1,
+    global_stmt(decl_struct, struct_block) >>= connect_with_body,
+    global_stmt(decl_function, block)      >>= connect_with_body,
 
     /**
      * `decl` is a declaration of name preceeded with type
@@ -174,15 +189,21 @@ rules(
     decl_function(decl, '(',  decl_list, ')') >>= make_fn_decl,
 
     /**
+     * structure might be declared as just a name or as a list of declarations
+     */
+    decl_struct(KWD(struct), term::type_id) >>= make_struct_def,
+    struct_block("{", struct_fields, '}') >>= make_block,
+    SEQUENCE_OF_SEP(struct_fields, decl, ';'),
+
+    /**
      * `block` is a list of statements wrapped into '{', '}'
      */
-    block("{", stmt_list, '}') >>= make_block,
+    block("{", stmt_list, '}')            >>= make_block,
 
     /**
      * `stmt_list` is a sequence of local context stetements
      */
-    stmt_list()                 >= create<list>{},
-    stmt_list(stmt_list, stmt)  >= push_back<1, 2>{},
+    SEQUENCE_OF(stmt_list, stmt),
 
     /**
      * `stmt` is any statement in local context. it might be:
