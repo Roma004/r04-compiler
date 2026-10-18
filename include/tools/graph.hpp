@@ -539,8 +539,10 @@ void GRAPH::set_egde_source(edge_iter edge, node_iter new_source) {
 
 GRAPH_TEMPLATE
 void GRAPH::remove_node(node_iter node) {
-    for (auto e : node->forward_edges()) remove_edge(e);
-    for (auto e : node->backward_edges()) remove_edge(e);
+    auto forward = node->forward_edges();
+    auto backward = node->backward_edges();
+    for (auto e : forward) remove_edge(e);
+    for (auto e : backward) remove_edge(e);
     nodes_list.erase(node);
 }
 

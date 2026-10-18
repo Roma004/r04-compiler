@@ -1,0 +1,43 @@
+int32_t value = 10;
+int32_t other;
+
+int32_t main() {
+    int32_t x = 1;
+    int32_t y = 2;
+    int32_t z = 0;
+    z = x + y;
+    z = x - y;
+    z = x * y;
+    z = x / y;
+    z = x % y;
+    z = x << 1;
+    z = x >> 1;
+    z = x & y;
+    z = x | y;
+    z = x ^ y;
+    z = x && y;
+    z = x || y;
+    z = x == y;
+    z = x != y;
+    z = x < y;
+    z = x > y;
+    z = x <= y;
+    z = x >= y;
+    z = -x;
+    z = ~x;
+    z = !x;
+    z += 1;
+    z -= 1;
+    z *= 2;
+    z /= 2;
+    z %= 2;
+    z <<= 1;
+    z >>= 1;
+    z &= 3;
+    z |= 3;
+    z ^= 3;
+    z = (int32_t) x;
+    z = (x + y) * (x - y);
+    z = value;
+    return z;
+}

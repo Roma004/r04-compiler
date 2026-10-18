@@ -142,9 +142,10 @@ BLOCKLIST_TEMPLATE
 bool BLOCKLIST::iterator_content::operator==(
     const iterator_content &other
 ) const noexcept {
-    return lst_it == other.lst_it
-        && const_cast<iterator_content &>(*this).get_idx()
-               == const_cast<iterator_content &>(other).get_idx();
+    if (lst_it != other.lst_it) return false;
+    if (blk_idx == (size_t)-1 && other.blk_idx == (size_t)-1) return true;
+    return const_cast<iterator_content &>(*this).get_idx()
+        == const_cast<iterator_content &>(other).get_idx();
 }
 
 BLOCKLIST_TEMPLATE

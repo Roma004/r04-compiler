@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.10)
 
 project(r04-compiler LANGUAGES CXX)
 
+enable_testing()
+
 include_directories(include)
 include_directories(lib/ctpg/include)
 
@@ -40,12 +42,14 @@ file(GLOB_RECURSE SRC_FILES "${PROJECT_SOURCE_DIR}/src/**/*.cpp")
 add_library(frontend_parser STATIC ${SRC_FILES})
 target_compile_options(
     frontend_parser PUBLIC
-    "-DCTPG_TABLE_FILE=\"frontend_parser_table.ctpg/frontend_parser_table.bin\""
+    "-DCTPG_TABLE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/frontend_parser_table.ctpg/frontend_parser_table.bin\""
+    --coverage
 )
 
 target_include_directories(frontend_parser PUBLIC
     ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(frontend_parser PUBLIC ctpg::ctpg)
+target_link_options(frontend_parser PUBLIC --coverage)
 
 ctpg_add_parser_table(
     TARGET          frontend_parser_table
@@ -58,6 +62,14 @@ ctpg_add_parser_table(
 
 add_executable(parser parse.cpp)
 target_link_libraries(parser PRIVATE frontend_parser)
+add_dependencies(parser frontend_parser_table)
+
+target_link_libraries(${ALL_TESTS} PRIVATE frontend_parser)
+target_compile_definitions(${ALL_TESTS} PRIVATE
+    PARSER_BINARY_PATH="$<TARGET_FILE:parser>"
+    TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
+add_dependencies(${ALL_TESTS} parser frontend_parser_table)
 
 # compile commands
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
@@ -76,7 +88,7 @@ if(GCOVR)
 
     add_custom_target(coverage
         COMMAND rm -rf ${COVERAGE_DIR}
-        COMMAND rm -f ${CMAKE_BINARY_DIR}/**/*.gcda
+        COMMAND find ${CMAKE_BINARY_DIR} -name '*.gcda' -delete
         COMMAND mkdir -p ${COVERAGE_HTML}
         COMMAND ${ALL_TESTS}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${COVERAGE_DIR}
@@ -86,7 +98,7 @@ if(GCOVR)
             --filter="${PROJECT_SOURCE_DIR}/include/"
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating coverage report with gcovr"
-        DEPENDS ${TESTS}
+        DEPENDS ${ALL_TESTS}
     )
 
     # Открыть в браузере

@@ -1,0 +1,26 @@
+void_t printi(int32_t num);
+
+int32_t main() {
+    int32_t sum = 0;
+    for (int32_t i = 0; i < 10; i += 1) {
+        if (i == 3) {
+            continue;
+        }
+        if (i == 8) {
+            break;
+        }
+        sum += i;
+        if (sum > 20) {
+            sum = sum - 1;
+        } else if (sum < 5) {
+            sum = sum + 1;
+        } else {
+            sum = 0;
+        }
+    }
+    for (; sum < 20;) {
+        sum += 1;
+    }
+    printi(sum);
+    return 0;
+}

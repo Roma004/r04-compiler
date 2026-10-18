@@ -158,7 +158,7 @@ struct Addr {
 
 struct Get {
     AST_EXPR;
-    EDGE_NAMES();
+    EDGE_NAMES(BASE, DEREF);
 
     std::string name;
     Get(std::string_view sv) : name(sv) {}
