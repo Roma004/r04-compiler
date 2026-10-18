@@ -26,6 +26,9 @@ struct node_type {
     void insert_const();
     void insert_array(size_t count);
 
+    bool is_function(const TypeTable &tb) const noexcept;
+    node_type return_type(const TypeTable &tb) const;
+
     size_t size_of(const TypeTable &tb) const noexcept;
     size_t align_of(const TypeTable &tb) const noexcept;
 
@@ -49,6 +52,11 @@ struct type_info {
     bool is_signed = false;
     bool is_integral = true;
     bool is_packed = false;
+
+    // function types: return type and parameters (parameters are stored in
+    // `fields` using the same engine as structure fields)
+    node_type return_type;
+    bool is_function = false;
 
     bool add_field(
         const std::string &name, const node_type &type, const TypeTable &tb

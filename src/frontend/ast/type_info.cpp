@@ -1,5 +1,6 @@
 #include <frontend/ast/type_info.hpp>
 
+#include <cassert>
 #include <utility>
 
 namespace frontend::ast {
@@ -14,6 +15,15 @@ void node_type::insert_const() {
 
 void node_type::insert_array(size_t count) {
     mods.push_back({.kind = modifier::Kind::Array, .count = count});
+}
+
+bool node_type::is_function(const TypeTable &tb) const noexcept {
+    return tb.get(type_id).is_function;
+}
+
+node_type node_type::return_type(const TypeTable &tb) const {
+    assert(is_function(tb));
+    return tb.get(type_id).return_type;
 }
 
 size_t node_type::size_of(const TypeTable &tb) const noexcept {
@@ -78,7 +88,19 @@ void type_info::update_size() {
 std::string node_type::repr(const TypeTable &tb) const {
     if (type_id == 0) return "void";
 
-    std::string res(tb.get(type_id).name);
+    const type_info &ti = tb.get(type_id);
+
+    if (ti.is_function) {
+        std::string res = ti.return_type.repr(tb) + " (";
+        for (size_t i = 0; i < ti.fields.size(); ++i) {
+            if (i) res += ", ";
+            res += ti.fields[i].type.repr(tb);
+        }
+        res += ")";
+        return res;
+    }
+
+    std::string res(ti.name);
 
     for (auto mod : mods) {
         switch (mod.kind) {

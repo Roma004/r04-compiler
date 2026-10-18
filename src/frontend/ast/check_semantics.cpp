@@ -55,7 +55,7 @@ struct context {
 
     parser::ParserContext &pctx;
     std::vector<ctx_layer> var_ctx;
-    std::vector<std::string> functions;
+    std::vector<ctx_layer::name_data> functions;
 
     int find_layer(const node_t &of_block) const;
     int push_layer(const node_t &of_block, bool is_cycle);
@@ -79,12 +79,13 @@ struct context {
     std::optional<node_type> type_of_name(std::string_view id);
     node decl_of_name(std::string_view name);
 
-    bool insert_function(std::string_view name);
+    bool insert_function(std::string_view name, node decl);
+    ctx_layer::name_data *get_function(std::string_view name);
     bool is_function_defined(std::string_view name);
 
     bool define_name(node n);
     bool define_type(node type);
-    bool define_function(node_t &n);
+    bool define_function(node n);
 
     bool check_global_names();
 
@@ -270,24 +271,34 @@ bool context::define_name(node nd) {
     return true;
 }
 
-bool context::define_function(node_t &n) {
-    assert(n.is<types::Declare>());
-    auto &name = n.get<types::Declare>().name;
-    if (!insert_function(name)) {
-        insert_error(std::format("redefinition of function `{}`", name), n.loc);
+bool context::define_function(node n) {
+    node_t &d = n->get_data();
+    assert(d.is<types::Declare>());
+    auto &name = d.get<types::Declare>().name;
+    if (!insert_function(name, n)) {
+        insert_error(std::format("redefinition of function `{}`", name), d.loc);
         return false;
     }
     return true;
 }
 
-bool context::insert_function(std::string_view name) {
+bool context::insert_function(std::string_view name, node decl) {
     if (is_function_defined(name)) return false;
-    functions.emplace_back(name);
+    functions.push_back({name, decl});
     return true;
 }
 
+ctx_layer::name_data *context::get_function(std::string_view name) {
+    auto it =
+        std::ranges::find_if(functions, [name](const ctx_layer::name_data &d) {
+            return d.name == name;
+        });
+    if (it == functions.end()) return nullptr;
+    return &*it;
+}
+
 bool context::is_function_defined(std::string_view name) {
-    return std::ranges::find(functions, name) != functions.end();
+    return get_function(name) != nullptr;
 }
 
 void context::insert_error(const std::string &msg, const loc_t &loc) {
@@ -388,22 +399,58 @@ bool context::check_global_names() {
 }
 
 bool context::check_function(node fn) {
-    if (!define_function(get_node(fn, types::Function::DECL)->get_data()))
-        return false;
+    node decl = get_node(fn, types::Function::DECL);
+    node_t &decl_data = decl->get_data();
+    auto &decl_s = decl_data.get<types::Declare>();
+
+    if (!define_function(decl)) return false;
+
+    node decl_type = get_node(decl, types::Declare::TYPE);
+    auto return_type = make_node_type(decl_type);
+    if (!return_type) return false;
 
     push_layer(fn->get_data(), /* is_cycle */ false);
 
-    bool stt = true;
+    type_info fn_type{
+        .name = decl_s.name,
+        .size = 1,
+        .align = 1,
+        .is_integral = false,
+        .return_type = *return_type,
+        .is_function = true,
+    };
+
+    bool ok = true;
     for (edge e : fn->forward_edges()) {
-        if (e->get_data().data >= types::Function::ARG0)
-            stt &= define_name(e->target());
+        if (e->get_data().data < types::Function::ARG0) continue;
+
+        node arg = e->target();
+        if (!define_name(arg)) {
+            ok = false;
+            continue;
+        }
+
+        auto &arg_s = arg->get_data().get<types::Declare>();
+        fn_type.fields.push_back({
+            .type = *arg->get_data().type,
+            .name = arg_s.name,
+        });
     }
-    if (!stt) return stt;
+
+    if (!ok) {
+        pop_layer();
+        return false;
+    }
+
+    decl_data.type =
+        node_type{.type_id = pctx.ast.types.insert_type(std::move(fn_type))};
 
     auto body_it = find_edge(fn, types::Function::BODY);
     if (body_it != fn->forward_edges().end()) check_block((*body_it)->target());
 
     pop_layer();
+
+    if (pctx.errors.empty()) remove_node(decl_type);
     return pctx.errors.empty();
 }
 
@@ -494,10 +541,14 @@ bool context::check_expr(node expr) {
                     continue;
                 }
                 const std::string &fname = cd.get<types::ID>().name;
-                if (!is_function_defined(fname))
+                if (ctx_layer::name_data *fn = get_function(fname)) {
+                    auto &fn_type = fn->decl->get_data().type;
+                    if (fn_type) d.type = fn_type->return_type(pctx.ast.types);
+                } else {
                     insert_error(
                         std::format("unknown function `{}`", fname), cd.loc
                     );
+                }
             } else {
                 check_expr(child);
             }
