@@ -38,11 +38,16 @@ int main(int argc, char **argv) {
     fout.open("asd.dot", std::ios_base::out);
     ctx.ast.to_dot(
         fout,
-        [](const auto &n) -> helpers::DOTList {
-            return {{"label", frontend::ast::to_string(n)}};
+        /* node attrs */ {{"shape", "record"}},
+        /* node conv  */
+        [&ctx](const auto &n) -> helpers::DOTList {
+            return {
+                {"label", ctx.ast.repr_node(n)},
+            };
         },
-        [](const auto &e) -> helpers::DOTList {
-            return {{"label", frontend::ast::to_string(e)}};
+        /* edge conv  */
+        [&ctx](const auto &e) -> helpers::DOTList {
+            return {{"label", ctx.ast.repr_edge(e)}};
         }
     );
     fout.close();

@@ -54,7 +54,7 @@
 #define SEQUENCE_OF_SEP(nterm, of_nterm, sep)             \
     nterm()                >>= create<list>{},   \
     nterm(nterm, of_nterm, sep)  >= push_back<1, 2>{} \
-// clang-format on
+    // clang-format on
 
 namespace frontend::parser {
 
@@ -94,7 +94,6 @@ DECL_KEYWORD(else);
 DECL_KEYWORD(for);
 DECL_KEYWORD(return);
 DECL_KEYWORD(const);
-DECL_KEYWORD(volatile);
 DECL_KEYWORD(break);
 DECL_KEYWORD(continue);
 DECL_KEYWORD(struct);
@@ -135,7 +134,7 @@ DECL_LIST_NTERM(struct_fields);
 // clang-format off
 ctpg::parser p(program,
 terms(
-    KEYWORDS(const, volatile, if, else, for, return, break, continue, struct),
+    KEYWORDS(const, if, else, for, return, break, continue, struct),
     term::chr_literal,
     term::str_literal,
     term::num_literal,
@@ -238,8 +237,8 @@ rules(
      * pointer dimensions of that type.
      */
     type_spec(term::type_id)             >>= create_from_sv<types::TypeSpec>,
-    type_spec(KWD(const), type_spec)     >>= add_const,
-    type_spec(KWD(volatile), type_spec)  >>= add_volatile,
+    type_spec(KWD(const), type_spec)     >>= add_const_left,
+    type_spec(type_spec, KWD(const))     >>= add_const,
     type_spec(type_spec, SGN(deref))     >>= add_deref,
     type_spec(type_spec, '[', expr, ']') >>= add_subscript,
 

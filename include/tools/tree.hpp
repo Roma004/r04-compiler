@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdexcept>
+#include <unordered_set>
+
 #include <tools/graph.hpp>
 
 namespace tools {
@@ -31,6 +33,23 @@ class tree_t : public orgraph_t<node_data, edge_data> {
      *                            nvalid somehow
      */
     void assert_integrity() const;
+
+    /**
+     * @brief Erase the node and every node reachable from it via forward
+     *        edges (the "subtree" of @p subroot in a tree).
+     *
+     * A valid tree is assumed (single path from the root to each node).
+     * If the graph is malformed (cycles, shared children), the effective
+     * subtree is whatever forward-reachability from @p subroot yields.
+     *
+     * After the call all edges incident to the erased nodes are gone as
+     * well. Iterators to surviving nodes remain valid. If the whole tree
+     * was erased, the stored root iterator is invalidated — call
+     * set_root() again before using get_root().
+     *
+     * @param  subroot  iterator to a valid node (must not be end())
+     */
+    void erase_subtree(node_iter subroot) noexcept;
 
   private:
     node_iter root;
@@ -67,6 +86,21 @@ void TREE::assert_integrity() const {
             return true;
         }
     );
+}
+
+TREE_TEMPLATE
+void TREE::erase_subtree(node_iter subroot) noexcept {
+    std::vector<node_iter> to_remove;
+
+    this->traverse(subroot, [&](auto, auto, node_iter n, bool is_visited) {
+        if (!is_visited) to_remove.push_back(n);
+        return true;
+    });
+
+    for (auto n : to_remove) { this->remove_node(n); }
+    this->remove_node(subroot);
+
+    if (this->size() == 0) root = node_iter{};
 }
 
 #undef TREE_TEMPLATE

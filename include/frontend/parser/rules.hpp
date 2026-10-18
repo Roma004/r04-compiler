@@ -68,6 +68,7 @@ inline node make_struct_def(CTX, str sv, str id) {
 
 inline node make_struct_decl(CTX, str sv, str id, char, list &&fields, char) {
     auto def = make_struct_def(ctx, sv, id);
+    def->get_data().get<types::Structure>().has_body = true;
     int idx = types::Structure::FIELD0;
     for (auto field : fields) { ctx.ast.emplace_edge(def, field, idx++); }
     return def;
@@ -191,20 +192,22 @@ inline node make_for(
 }
 // clang-format on
 
-inline node add_const(CTX, str sv, node type) {
+inline node add_const(CTX, node type, str sv) {
     // TODO: if already add, insert warning
-    type->get_data().get<ast::types::TypeSpec>().add_const();
+    auto child = create_node<types::Const>(ctx, sv2loc(sv));
+    ctx.ast.emplace_edge(type, child, type->forward_edges().size());
     return type;
 }
 
-inline node add_volatile(CTX, str sv, node type) {
+inline node add_const_left(CTX, str sv, node type) {
     // TODO: if already add, insert warning
-    type->get_data().get<ast::types::TypeSpec>().add_volatile();
+    auto child = create_node<types::Const>(ctx, sv2loc(sv));
+    ctx.ast.emplace_edge(type, child, type->forward_edges().size());
     return type;
 }
 
 inline node add_deref(CTX, node type, str sv) {
-    auto child = create_node<types::Pointer>(ctx, sv2loc(sv));
+    auto child = create_node<types::Deref>(ctx, sv2loc(sv));
     ctx.ast.emplace_edge(type, child, type->forward_edges().size());
     return type;
 }

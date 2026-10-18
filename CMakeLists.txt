@@ -11,6 +11,8 @@ else()
 add_definitions("-O0 -ggdb3 -std=c++20")
 endif()
 
+add_definitions("-DAST_REMOVE_UNUSED_NODES")
+
 # tests
 find_package(Catch2 REQUIRED)
 

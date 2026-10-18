@@ -4,8 +4,10 @@
 #include <utility>
 #include <variant>
 
+#include <frontend/ast/type_info.hpp>
 #include <frontend/ast/types.hpp>
 #include <frontend/parser/source_map.hpp>
+#include <tools/macro_template.hpp>
 #include <tools/tree.hpp>
 
 namespace frontend::parser {
@@ -31,6 +33,11 @@ struct node_t {
     template <typename T> const T &get() const { return std::get<T>(val); }
 
     template <typename T> bool is() { return std::holds_alternative<T>(val); }
+    template <typename T> bool is() const {
+        return std::holds_alternative<T>(val);
+    }
+
+    std::string repr(const TypeTable &tb) const;
 
     std::variant<
         types::Root,
@@ -46,7 +53,6 @@ struct node_t {
         types::Cast,
         types::Declare,
         types::TypeSpec,
-        types::Pointer,
         types::Assign,
         types::Function,
         types::If,
@@ -57,11 +63,13 @@ struct node_t {
         types::Call,
         types::Block,
         types::Break,
+        types::Const,
         types::Continue,
         types::Structure,
         types::Get>
         val;
     parser::SourceLocation loc = {};
+    std::optional<node_type> type;
 };
 
 struct edge_t {
@@ -78,25 +86,11 @@ class Ast : public ast_tree_t {
     using const_edge_iter = tree_t::const_edge_iter;
 
     bool check_semantics(parser::ParserContext &);
+
+    TypeTable types;
+
+    std::string repr_node(const const_node_iter &node) const;
+    std::string repr_edge(const const_edge_iter &node) const;
 };
-
-inline std::string to_string(const Ast::const_node_iter &node) {
-    using std::to_string;
-    return std::visit(
-        [](const auto &v) { return to_string(v); }, node->get_data().val
-    );
-}
-
-inline std::string to_string(const Ast::const_edge_iter &edge) {
-    const node_t &node = edge->source()->get_data();
-    return std::visit(
-        [&edge](const auto &v) {
-            return types::edge_data_to_string<std::remove_cvref_t<decltype(v)>>(
-                edge->get_data().data
-            );
-        },
-        node.val
-    );
-}
 
 }; // namespace frontend::ast
