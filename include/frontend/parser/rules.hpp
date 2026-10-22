@@ -1,7 +1,7 @@
 #pragma once
 
 #include "frontend/ast/types.hpp"
-#include <frontend/parser/context.hpp>
+#include "frontend/parser/context.hpp"
 
 namespace frontend::parser {
 
@@ -207,7 +207,7 @@ inline node add_const_left(CTX, str sv, node type) {
 }
 
 inline node add_deref(CTX, node type, str sv) {
-    auto child = create_node<types::Deref>(ctx, sv2loc(sv));
+    auto child = create_node<types::Ptr>(ctx, sv2loc(sv));
     ctx.ast.emplace_edge(type, child, type->forward_edges().size());
     return type;
 }

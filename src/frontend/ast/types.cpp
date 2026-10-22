@@ -224,7 +224,7 @@ TypeSpec::TypeSpec(std::string_view sv) : name(sv), attrs(0) {
         size = 1;
     } else if (sv == "bool_t") {
         attrs |= INTEGRAL;
-        size = 1;
+        size = 4;
     } else if (sv == "uint8_t") {
         attrs |= INTEGRAL;
         size = 1;

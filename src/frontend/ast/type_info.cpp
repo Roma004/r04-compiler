@@ -1,20 +1,23 @@
-#include <frontend/ast/type_info.hpp>
+#include "frontend/ast/type_info.hpp"
 
 #include <cassert>
 #include <utility>
 
 namespace frontend::ast {
 
-void node_type::insert_pointer() {
-    mods.push_back({.kind = modifier::Kind::Pointer});
+void node_type::insert_pointer(bool is_const) {
+    mods.push_back({.kind = modifier::Kind::Pointer, .is_const = is_const});
 }
 
 void node_type::insert_const() {
-    mods.push_back({.kind = modifier::Kind::Const});
+    if (mods.empty()) is_const = true;
+    else mods.back().is_const = true;
 }
 
-void node_type::insert_array(size_t count) {
-    mods.push_back({.kind = modifier::Kind::Array, .count = count});
+void node_type::insert_array(size_t count, bool is_const) {
+    mods.push_back(
+        {.kind = modifier::Kind::Array, .count = count, .is_const = is_const}
+    );
 }
 
 bool node_type::is_function(const TypeTable &tb) const noexcept {
@@ -30,7 +33,6 @@ size_t node_type::size_of(const TypeTable &tb) const noexcept {
     size_t sz = tb.get(type_id).size;
     for (const auto &m : mods) {
         switch (m.kind) {
-        case modifier::Kind::Const: break;
         case modifier::Kind::Pointer: sz = sizeof(void *); break;
         case modifier::Kind::Array: sz *= m.count; break;
         }
@@ -42,7 +44,6 @@ size_t node_type::align_of(const TypeTable &tb) const noexcept {
     size_t a = tb.get(type_id).align;
     for (const auto &m : mods) {
         switch (m.kind) {
-        case modifier::Kind::Const: break;
         case modifier::Kind::Pointer: a = alignof(void *); break;
         case modifier::Kind::Array: break;
         }
@@ -86,8 +87,6 @@ void type_info::update_size() {
 }
 
 std::string node_type::repr(const TypeTable &tb) const {
-    if (type_id == 0) return "void";
-
     const type_info &ti = tb.get(type_id);
 
     if (ti.is_function) {
@@ -102,15 +101,16 @@ std::string node_type::repr(const TypeTable &tb) const {
 
     std::string res(ti.name);
 
+    if (is_const) res += " const";
+
     for (auto mod : mods) {
         switch (mod.kind) {
         case modifier::Kind::Pointer: res += " *"; break;
-        case modifier::Kind::Const: res += " const"; break;
         case modifier::Kind::Array:
             res += " [" + std::to_string(mod.count) + "]";
             break;
-        default: break;
         }
+        if (mod.is_const) res += " const";
     }
 
     return res;
@@ -174,7 +174,7 @@ void TypeTable::insert_basic_type(
          .size = size,
          .align = (uint8_t)size,
          .is_signed = is_signed,
-         .is_integral = name == "void_t"}
+         .is_integral = name != "void_t"}
     );
 }
 

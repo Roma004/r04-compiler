@@ -1,10 +1,10 @@
+#include "frontend/ast/ast.hpp"
 #include "frontend/ast/type_info.hpp"
 #include "frontend/ast/types.hpp"
+#include "frontend/parser/context.hpp"
 #include "frontend/parser/source_map.hpp"
 #include <algorithm>
 #include <cassert>
-#include <frontend/ast/ast.hpp>
-#include <frontend/parser/context.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -47,6 +47,132 @@ struct ctx_layer {
 
 static node_type lang_char_t;
 static node_type lang_string_t;
+
+/** @brief get integer type description if @p type is not a pointer/array */
+static const type_info *as_integer(const node_type &type, TypeTable &tb) {
+    if (!type.mods.empty()) return nullptr;
+
+    const type_info &info = tb.get(type.type_id);
+    if (info.is_function || !info.is_integral) return nullptr;
+    return &info;
+}
+
+/** @brief build a basic integer type of the given size and signedness */
+static node_type
+make_integer_type(TypeTable &tb, uint8_t size, bool is_signed) {
+    std::string_view name;
+    switch (size) {
+    case 1: name = is_signed ? "int8_t" : "uint8_t"; break;
+    case 2: name = is_signed ? "int16_t" : "uint16_t"; break;
+    case 4: name = is_signed ? "int32_t" : "uint32_t"; break;
+    case 8: name = is_signed ? "int64_t" : "uint64_t"; break;
+    default:
+        if (size <= 1) name = is_signed ? "int8_t" : "uint8_t";
+        else if (size <= 2) name = is_signed ? "int16_t" : "uint16_t";
+        else if (size <= 4) name = is_signed ? "int32_t" : "uint32_t";
+        else name = is_signed ? "int64_t" : "uint64_t";
+        break;
+    }
+    return node_type{.type_id = tb.get_id(name)};
+}
+
+/**
+ * @brief apply the C integer promotions to a single operand
+ *
+ * Integer types with a rank lower than `int` promote to `int32_t`, while
+ * wider types are left unchanged.
+ */
+static node_type promoted_integer_type(TypeTable &tb, const type_info &info) {
+    if (info.size < 4) return make_integer_type(tb, 4, true);
+    return make_integer_type(tb, info.size, info.is_signed);
+}
+
+/**
+ * @brief usual arithmetic conversion of two integer operands
+ *
+ * Both operands undergo the integer promotions first. The result has the size
+ * of the wider operand and is signed only if both operands are signed (or the
+ * wider one is signed), matching the C usual arithmetic conversions.
+ */
+static node_type
+common_integer_type(TypeTable &tb, const node_type &lhs, const node_type &rhs) {
+    const type_info &l = tb.get(lhs.type_id);
+    const type_info &r = tb.get(rhs.type_id);
+
+    const uint8_t l_size = l.size < 4 ? 4 : l.size;
+    const bool l_signed = l.size < 4 ? true : l.is_signed;
+    const uint8_t r_size = r.size < 4 ? 4 : r.size;
+    const bool r_signed = r.size < 4 ? true : r.is_signed;
+
+    uint8_t size;
+    bool is_signed;
+
+    if (l_size == r_size) {
+        size = l_size;
+        is_signed = l_signed && r_signed;
+    } else if (l_size > r_size) {
+        size = l_size;
+        is_signed = l_signed;
+    } else {
+        size = r_size;
+        is_signed = r_signed;
+    }
+
+    return make_integer_type(tb, size, is_signed);
+}
+
+/**
+ * @brief type produced by the boolean/relational operators
+ *
+ * C-like languages produce a plain `int` for such operators.
+ */
+static node_type boolean_type(TypeTable &tb) {
+    return make_integer_type(tb, 4, true);
+}
+
+/** @brief whether @p a is written before @p b in the source */
+static bool source_before(
+    const parser::SourceLocation &a, const parser::SourceLocation &b
+) noexcept {
+    return a.line < b.line || (a.line == b.line && a.column < b.column);
+}
+
+/**
+ * @brief get the type of the value a pointer or an array gives access to
+ *
+ * Modifiers are applied from right to left, so the last one is the outermost
+ * and it is the one a subscription or a dereference removes. The `const` of
+ * that level belongs to the removed object and is dropped together with it
+ * (`uint32_t * const` -> `uint32_t`).
+ */
+static std::optional<node_type> pointee_type(const node_type &type) {
+    if (type.mods.empty()) return std::nullopt;
+
+    node_type result = type;
+    result.mods.pop_back();
+    return result;
+}
+
+/**
+ * @brief why a value of @p type cannot be assigned to, or null if it can
+ *
+ * `const` qualifies the object it is written at, so only the outermost level
+ * of the type matters: `uint32_t const *` is a const pointer which cannot be
+ * reassigned, while `const uint32_t *` points to a value which cannot be
+ * assigned through the pointer. An array is not assignable at all, because
+ * its name denotes all of the elements at once.
+ */
+static const char *assign_error(const node_type &type) noexcept {
+    if (!type.mods.empty()
+        && type.mods.back().kind == node_type::modifier::Kind::Array)
+        return "cannot assign to an array";
+
+    const bool is_const =
+        type.mods.empty() ? type.is_const : type.mods.back().is_const;
+    if (is_const) return "cannot assign to a const value";
+
+    return nullptr;
+}
 
 struct context {
     using node = Ast::node_iter;
@@ -92,7 +218,17 @@ struct context {
     bool check_function(node fn);
     bool check_block(node blk);
     bool check_stmt(node stmt);
+    bool check_assign_target(node target);
     bool check_expr(node expr);
+
+    bool check_binary_op(node expr);
+    bool check_unary_op(node expr);
+    bool check_subscript(node expr);
+    bool check_deref(node expr);
+    bool check_addr(node expr);
+    bool check_get(node expr);
+    bool check_cast(node expr);
+    bool check_call(node expr);
 
     std::optional<types::Literal> reduce_constant(node n);
 
@@ -153,21 +289,61 @@ std::optional<node_type> context::make_node_type(node n) {
     type_info &base_type = get_type(ts.name);
     node_type type{.type_id = base_type.type_id};
 
-    for (auto e : n->forward_edges()) {
-        auto &e_data = e->get_data();
-        if (e_data.data < types::TypeSpec::DIM0) continue;
+    std::vector<node> modifiers;
+    for (auto e : n->forward_edges()) modifiers.push_back(e->target());
 
-        node dim = e->target();
-        if (dim->get_data().is<types::Deref>()) {
-            type.insert_pointer();
-        } else if (dim->get_data().is<types::Const>()) {
-            type.insert_const();
+    // The parser attaches a leading `const` after the other modifiers, so the
+    // edge order does not always match the source order. Sort by location to
+    // process the modifiers in the order they are written in.
+    std::ranges::sort(modifiers, [](node a, node b) {
+        return source_before(a->get_data().loc, b->get_data().loc);
+    });
+
+    // `const` qualifies the type construct written next to its right, so a
+    // leading `const` qualifies the base type while any other one qualifies
+    // the pointer or array which follows it. A trailing `const` qualifies the
+    // whole type, i.e. its outermost level.
+    bool pending_const = false;
+    bool base_done = false;
+
+    auto push_base = [&]() noexcept {
+        if (base_done) return;
+        type.is_const = pending_const;
+        pending_const = false;
+        base_done = true;
+    };
+
+    for (node mod : modifiers) {
+        const node_t &mod_data = mod->get_data();
+
+        // only `const` may be written before the name of the type
+        if (!base_done && source_before(mod_data.loc, n_data.loc)) {
+            assert(mod_data.is<types::Const>());
+            pending_const = true;
+            continue;
+        }
+
+        push_base();
+
+        if (mod_data.is<types::Ptr>()) {
+            type.insert_pointer(pending_const);
+            pending_const = false;
+        } else if (mod_data.is<types::Const>()) {
+            pending_const = true;
         } else {
-            auto idx_o = reduce_constant(dim);
+            auto idx_o = reduce_constant(mod);
             if (!idx_o) return std::nullopt;
-            type.insert_array((size_t)*idx_o);
+            type.insert_array((size_t)*idx_o, pending_const);
+            pending_const = false;
         }
     }
+
+    push_base();
+
+    // `pending_const` is still set only when the base type was already
+    // pushed, which means the `const` had nothing on its right and qualifies
+    // the type as a whole
+    if (pending_const) type.insert_const();
 
     return type;
 }
@@ -193,8 +369,25 @@ bool context::define_type(node n) {
 
     type_info &new_tp = get_type(type_id);
 
+    bool has_body = n_data.get<types::Structure>().has_body;
+    node fields_container = n;
+
+    // The parser attaches a structure body as a `Block` (the same way it does
+    // for functions), so unwrap it to reach the field declarations.
+    if (!has_body) {
+        for (auto e : n->forward_edges()) {
+            if (e->get_data().data < types::Structure::FIELD0) continue;
+            node target = e->target();
+            if (target->get_data().is<types::Block>()) {
+                has_body = true;
+                fields_container = target;
+                break;
+            }
+        }
+    }
+
     // if type has no body, no other attions required
-    if (!n_data.get<types::Structure>().has_body) return true;
+    if (!has_body) return true;
 
     // check if type is fully defined and if so, raise exception
     if (new_tp.size != 0) {
@@ -203,9 +396,11 @@ bool context::define_type(node n) {
     }
 
     // then define the fields of the type
-    for (auto e : n->forward_edges()) {
+    for (auto e : fields_container->forward_edges()) {
         // search for start of field nodes
-        if (e->get_data().data < types::Structure::FIELD0) continue;
+        if (fields_container == n
+            && e->get_data().data < types::Structure::FIELD0)
+            continue;
 
         // current node is declareation of new field
         node decl = e->target();
@@ -215,6 +410,8 @@ bool context::define_type(node n) {
         node field = get_node(decl, types::Declare::TYPE);
         auto field_type = make_node_type(field);
         if (!field_type) return false;
+
+        decl->get_data().type = *field_type;
 
         if (field_type->size_of(pctx.ast.types) == 0) {
             insert_error(
@@ -383,6 +580,7 @@ bool context::check_global_names() {
             define_name(stmt);
         } else if (d.is<types::Assign>()) {
             if (!define_name(get_node(stmt, types::Assign::LEFT))) continue;
+            check_expr(get_node(stmt, types::Assign::RIGHT));
         } else if (d.is<types::Structure>()) {
             define_type(stmt);
             to_remove.push_back(stmt);
@@ -469,10 +667,31 @@ bool context::check_stmt(node stmt) {
     if (d.is<types::Declare>()) { return define_name(stmt); }
 
     if (d.is<types::Assign>()) {
-        check_expr(get_node(stmt, types::Assign::RIGHT));
-        auto l = get_node(stmt, types::Assign::LEFT);
-        if (l->get_data().is<types::Declare>()) return define_name(l);
-        else return check_expr(l);
+        node right = get_node(stmt, types::Assign::RIGHT);
+        check_expr(right);
+
+        node left = get_node(stmt, types::Assign::LEFT);
+        if (left->get_data().is<types::Declare>()) return define_name(left);
+
+        // Compound assignment is parsed as `lhs = (lhs op rhs)`, where the
+        // assignment target is a childless copy of the binary operation's
+        // left operand. Reuse that operand's type for the copy.
+        if (right->get_data().is<types::BinaryOp>()
+            && left->forward_edges().empty()) {
+            node operand = get_node(right, types::BinaryOp::LEFT);
+            const auto &operand_data = operand->get_data();
+            const auto &left_data = left->get_data();
+            if (operand_data.loc.line == left_data.loc.line
+                && operand_data.loc.column == left_data.loc.column
+                && operand_data.val.index() == left_data.val.index()) {
+                if (operand_data.type)
+                    left->get_data().type = operand_data.type;
+                return check_assign_target(left);
+            }
+        }
+
+        if (!check_expr(left)) return false;
+        return check_assign_target(left);
     }
 
     if (d.is<types::Return>()) { return check_expr(get_node(stmt, 0)); }
@@ -506,17 +725,36 @@ bool context::check_stmt(node stmt) {
     return true;
 }
 
+bool context::check_assign_target(node target) {
+    const auto &type = target->get_data().type;
+
+    // the type is unknown only when the target itself failed to type-check,
+    // and that failure is reported by its own analysis
+    if (!type) return false;
+
+    const char *error = assign_error(*type);
+    if (error == nullptr) return true;
+
+    insert_error(error, target->get_data().loc);
+    return false;
+}
+
 bool context::check_expr(node expr) {
     node_t &d = expr->get_data();
+    TypeTable &tb = pctx.ast.types;
 
     if (d.is<types::ID>()) {
         const std::string &name = d.get<types::ID>().name;
-        if (!is_name_defined(name) && !is_function_defined(name)) {
-            insert_error(std::format("undefined name `{}`", name), d.loc);
-            return false;
+        if (is_name_defined(name)) {
+            d.type = type_of_name(name);
+            return true;
         }
-        d.type = type_of_name(name);
-        return true;
+        if (ctx_layer::name_data *fn = get_function(name)) {
+            d.type = fn->decl->get_data().type;
+            return true;
+        }
+        insert_error(std::format("undefined name `{}`", name), d.loc);
+        return false;
     }
 
     if (d.is<types::CharLiteral>()) {
@@ -529,43 +767,253 @@ bool context::check_expr(node expr) {
         return true;
     }
 
-    if (d.is<types::Literal>()) return true;
-
-    if (d.is<types::Call>()) {
-        for (edge e : expr->forward_edges()) {
-            node child = e->target();
-            if (e->get_data().data == types::Call::EXPR) {
-                node_t &cd = child->get_data();
-                if (!cd.is<types::ID>()) {
-                    insert_error("call target must be an identifier", cd.loc);
-                    continue;
-                }
-                const std::string &fname = cd.get<types::ID>().name;
-                if (ctx_layer::name_data *fn = get_function(fname)) {
-                    auto &fn_type = fn->decl->get_data().type;
-                    if (fn_type) d.type = fn_type->return_type(pctx.ast.types);
-                } else {
-                    insert_error(
-                        std::format("unknown function `{}`", fname), cd.loc
-                    );
-                }
-            } else {
-                check_expr(child);
-            }
-        }
+    if (d.is<types::Literal>()) {
+        auto &lit = d.get<types::Literal>();
+        d.type = make_integer_type(tb, lit.size, lit.is_signed);
         return true;
     }
 
-    if (d.is<types::Cast>()) {
-        for (edge e : expr->forward_edges()) {
-            if (e->get_data().data == types::Cast::TYPE) continue;
-            check_expr(e->target());
-        }
-        return true;
-    }
+    // declarations are annotated by `define_name` / `define_type`
+    if (d.is<types::Declare>()) return d.type.has_value();
+
+    if (d.is<types::BinaryOp>()) return check_binary_op(expr);
+    if (d.is<types::UnaryOp>()) return check_unary_op(expr);
+    if (d.is<types::Subscript>()) return check_subscript(expr);
+    if (d.is<types::Deref>()) return check_deref(expr);
+    if (d.is<types::Addr>()) return check_addr(expr);
+    if (d.is<types::Get>()) return check_get(expr);
+    if (d.is<types::Cast>()) return check_cast(expr);
+    if (d.is<types::Call>()) return check_call(expr);
 
     for (edge e : expr->forward_edges()) check_expr(e->target());
     return true;
+}
+
+bool context::check_binary_op(node expr) {
+    node_t &d = expr->get_data();
+    const std::string &op = d.get<types::BinaryOp>().op;
+    TypeTable &tb = pctx.ast.types;
+
+    node left = get_node(expr, types::BinaryOp::LEFT);
+    node right = get_node(expr, types::BinaryOp::RIGHT);
+
+    bool ok = check_expr(left);
+    ok &= check_expr(right);
+
+    const bool is_boolean = op == "||" || op == "&&" || op == "==" || op == "!="
+                         || op == "<" || op == ">" || op == "<=" || op == ">=";
+
+    if (is_boolean) {
+        d.type = boolean_type(tb);
+        return ok;
+    }
+
+    const auto &left_type = left->get_data().type;
+    const auto &right_type = right->get_data().type;
+    if (!left_type || !right_type) return false;
+
+    const type_info *left_info = as_integer(*left_type, tb);
+    const type_info *right_info = as_integer(*right_type, tb);
+    if (!left_info || !right_info) {
+        insert_error(
+            std::format("invalid operands to binary operator `{}`", op), d.loc
+        );
+        d.type = make_integer_type(tb, 4, true);
+        return false;
+    }
+
+    // shifts keep the promoted type of the left operand
+    if (op == "<<" || op == ">>") {
+        d.type = promoted_integer_type(tb, *left_info);
+        return ok;
+    }
+
+    d.type = common_integer_type(tb, *left_type, *right_type);
+    return ok;
+}
+
+bool context::check_unary_op(node expr) {
+    node_t &d = expr->get_data();
+    const std::string &op = d.get<types::UnaryOp>().op;
+    TypeTable &tb = pctx.ast.types;
+
+    node arg = get_node(expr, types::UnaryOp::ARG);
+    bool ok = check_expr(arg);
+
+    if (op == "!") {
+        d.type = boolean_type(tb);
+        return ok;
+    }
+
+    const auto &arg_type = arg->get_data().type;
+    if (!arg_type) return false;
+
+    const type_info *info = as_integer(*arg_type, tb);
+    if (!info) {
+        insert_error(
+            std::format("invalid operand to unary operator `{}`", op), d.loc
+        );
+        d.type = make_integer_type(tb, 4, true);
+        return false;
+    }
+
+    d.type = promoted_integer_type(tb, *info);
+    return ok;
+}
+
+bool context::check_subscript(node expr) {
+    node_t &d = expr->get_data();
+
+    node value = get_node(expr, types::Subscript::VALUE);
+    node index = get_node(expr, types::Subscript::IDX);
+
+    bool ok = check_expr(value);
+    ok &= check_expr(index);
+
+    const auto &value_type = value->get_data().type;
+    if (!value_type) return false;
+
+    auto element = pointee_type(*value_type);
+    if (!element) {
+        insert_error("subscripted value is not an array or a pointer", d.loc);
+        return false;
+    }
+
+    const auto &index_type = index->get_data().type;
+    if (index_type && !as_integer(*index_type, pctx.ast.types)) {
+        insert_error("subscript index is not an integer", d.loc);
+        ok = false;
+    }
+
+    d.type = *element;
+    return ok;
+}
+
+bool context::check_deref(node expr) {
+    node_t &d = expr->get_data();
+
+    node value = get_node(expr, 0);
+    bool ok = check_expr(value);
+
+    const auto &value_type = value->get_data().type;
+    if (!value_type) return false;
+
+    auto element = pointee_type(*value_type);
+    if (!element) {
+        insert_error("cannot dereference a non-pointer value", d.loc);
+        return false;
+    }
+
+    d.type = *element;
+    return ok;
+}
+
+bool context::check_addr(node expr) {
+    node_t &d = expr->get_data();
+
+    node value = get_node(expr, 0);
+    bool ok = check_expr(value);
+
+    const auto &value_type = value->get_data().type;
+    if (!value_type) return false;
+
+    d.type = *value_type;
+    d.type->insert_pointer();
+    return ok;
+}
+
+bool context::check_get(node expr) {
+    node_t &d = expr->get_data();
+    const std::string &member = d.get<types::Get>().name;
+
+    const auto deref_edge = find_edge(expr, types::Get::DEREF);
+    const auto base_edge = find_edge(expr, types::Get::BASE);
+
+    const bool from_deref = deref_edge != expr->forward_edges().end();
+    const auto source_edge = from_deref ? deref_edge : base_edge;
+    if (source_edge == expr->forward_edges().end()) {
+        // malformed member access (no base expression) - nothing to deduce
+        return false;
+    }
+
+    node source = (*source_edge)->target();
+    bool ok = check_expr(source);
+
+    const auto &source_type = source->get_data().type;
+    if (!source_type) return false;
+
+    if (!source_type->mods.empty()) {
+        insert_error("member access on a non-struct value", d.loc);
+        return false;
+    }
+
+    const type_info &base = pctx.ast.types.get(source_type->type_id);
+    if (base.is_integral || base.is_function) {
+        insert_error("member access on a non-struct value", d.loc);
+        return false;
+    }
+
+    auto field =
+        std::ranges::find_if(base.fields, [&member](const type_info::field &f) {
+            return f.name == member;
+        });
+    if (field == base.fields.end()) {
+        insert_error(std::format("no member named `{}`", member), d.loc);
+        return false;
+    }
+
+    d.type = field->type;
+    return ok;
+}
+
+bool context::check_cast(node expr) {
+    node_t &d = expr->get_data();
+
+    node value = get_node(expr, types::Cast::VALUE);
+    bool ok = check_expr(value);
+
+    node type_node = get_node(expr, types::Cast::TYPE);
+    auto cast_type = make_node_type(type_node);
+    if (cast_type) d.type = *cast_type;
+    else ok = false;
+
+    return ok;
+}
+
+bool context::check_call(node expr) {
+    node_t &d = expr->get_data();
+    TypeTable &tb = pctx.ast.types;
+    bool ok = true;
+
+    node callee = get_node(expr, types::Call::EXPR);
+    node_t &callee_data = callee->get_data();
+
+    if (!callee_data.is<types::ID>()) {
+        insert_error("call target must be an identifier", callee_data.loc);
+        check_expr(callee);
+        ok = false;
+    } else {
+        const std::string &name = callee_data.get<types::ID>().name;
+        if (ctx_layer::name_data *fn = get_function(name)) {
+            auto &fn_type = fn->decl->get_data().type;
+            if (fn_type) {
+                callee_data.type = fn_type;
+                d.type = fn_type->return_type(tb);
+            }
+        } else {
+            insert_error(
+                std::format("unknown function `{}`", name), callee_data.loc
+            );
+            ok = false;
+        }
+    }
+
+    for (edge e : expr->forward_edges()) {
+        if (e->get_data().data == types::Call::EXPR) continue;
+        ok &= check_expr(e->target());
+    }
+
+    return ok;
 }
 
 bool Ast::check_semantics(parser::ParserContext &ctx) {

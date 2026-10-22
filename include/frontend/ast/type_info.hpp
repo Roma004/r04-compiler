@@ -5,26 +5,40 @@
 #include <string>
 #include <vector>
 
-#include <tools/macro_template.hpp>
+#include "tools/macro_template.hpp"
 
 namespace frontend::ast {
 
 class TypeTable;
 
-/** type of node with const, pointer and array extensions */
+/**
+ * type of node with const, pointer and array extensions
+ *
+ * Modifiers are stored from the innermost one to the outermost one, so
+ * `uint32_t *[5][3]` is an array of three arrays of five pointers to
+ * `uint32_t`. `const` is stored on the level of the object it qualifies:
+ * `is_const` for the base type, `modifier::is_const` for pointers and arrays.
+ */
 struct node_type {
     struct modifier {
-        enum class Kind : uint8_t { Const, Pointer, Array };
-        Kind kind = Kind::Const;
+        enum class Kind : uint8_t { Pointer, Array };
+        Kind kind = Kind::Pointer;
         uint64_t count = 0;
+        bool is_const = false;
     };
 
     std::vector<modifier> mods;
     unsigned type_id = 0;
+    bool is_const = false;
 
-    void insert_pointer();
+    /** put a pointer on top of the current type */
+    void insert_pointer(bool is_const = false);
+
+    /** put an array on top of the current type */
+    void insert_array(size_t count, bool is_const = false);
+
+    /** qualify the outermost level (the base type if there is none) as const */
     void insert_const();
-    void insert_array(size_t count);
 
     bool is_function(const TypeTable &tb) const noexcept;
     node_type return_type(const TypeTable &tb) const;

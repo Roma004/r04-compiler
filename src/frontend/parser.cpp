@@ -86,7 +86,11 @@ DECL_REGEX_TERM(chr_literal, R"regex('([^'\\]|\\.)*')regex");
 DECL_REGEX_TERM(id, "[A-Za-z_][0-9A-Za-z_]*");
 DECL_REGEX_TERM(type_id, "[A-Za-z_][0-9A-Za-z_]*_t");
 DECL_REGEX_TERM(
-    num_literal, "[1-9][0-9]*|0[xX][0-9a-fA-F]+|0[bB][01]+|0[0-7]*"
+    num_literal,
+    "[1-9][0-9]*([uU]([lL][lL]?)?|[lL][lL]?[uU]?)?"
+    "|0[xX][0-9a-fA-F]+([uU]([lL][lL]?)?|[lL][lL]?[uU]?)?"
+    "|0[bB][01]+([uU]([lL][lL]?)?|[lL][lL]?[uU]?)?"
+    "|0[0-7]*([uU]([lL][lL]?)?|[lL][lL]?[uU]?)?"
 );
 
 DECL_KEYWORD(if);
@@ -232,9 +236,12 @@ rules(
     for_cond(expr) >= _e1,
 
     /**
-     * `type_spec` is any id, qualified using const and volatile specifiers.
-     * All subscript and dereference operators are treated as array or
-     * pointer dimensions of that type.
+     * `type_spec` is any id qualified using `const` specifiers and extended
+     * with pointer and array dimensions. Dimensions are applied from right to
+     * left, so `int32_t *[2][3]` is an array of three arrays of two pointers
+     * to `int32_t`. `const` qualifies the type construct written next to its
+     * right, so `const int32_t *` points to a const value, while
+     * `int32_t const *` is a const pointer.
      */
     type_spec(term::type_id)             >>= create_from_sv<types::TypeSpec>,
     type_spec(KWD(const), type_spec)     >>= add_const_left,

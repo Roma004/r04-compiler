@@ -5,7 +5,7 @@
 #include <string>
 #include <string_view>
 
-#include <tools/macro_template.hpp>
+#include "tools/macro_template.hpp"
 
 namespace frontend::ast::types {
 
@@ -230,6 +230,14 @@ struct Const {
     EDGE_NAMES();
 
     std::string repr() const { return "const"; }
+};
+
+/** pointer modifier of a type specification */
+struct Ptr {
+    AST_STMT;
+    EDGE_NAMES();
+
+    std::string repr() const { return "ptr"; }
 };
 
 struct Cast {

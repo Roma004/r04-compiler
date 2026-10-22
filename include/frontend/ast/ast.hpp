@@ -4,11 +4,10 @@
 #include <utility>
 #include <variant>
 
-#include <frontend/ast/type_info.hpp>
-#include <frontend/ast/types.hpp>
-#include <frontend/parser/source_map.hpp>
-#include <tools/macro_template.hpp>
-#include <tools/tree.hpp>
+#include "frontend/ast/type_info.hpp"
+#include "frontend/ast/types.hpp"
+#include "frontend/parser/source_map.hpp"
+#include "tools/tree.hpp"
 
 namespace frontend::parser {
 struct ParserContext;
@@ -64,6 +63,7 @@ struct node_t {
         types::Block,
         types::Break,
         types::Const,
+        types::Ptr,
         types::Continue,
         types::Structure,
         types::Get>
