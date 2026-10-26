@@ -31,8 +31,10 @@ struct node_t {
     template <typename T> T &get() { return std::get<T>(val); }
     template <typename T> const T &get() const { return std::get<T>(val); }
 
-    template <typename T> bool is() { return std::holds_alternative<T>(val); }
-    template <typename T> bool is() const {
+    template <typename T> constexpr bool is() {
+        return std::holds_alternative<T>(val);
+    }
+    template <typename T> constexpr bool is() const {
         return std::holds_alternative<T>(val);
     }
 
@@ -62,10 +64,13 @@ struct node_t {
         types::Call,
         types::Block,
         types::Break,
-        types::Const,
         types::Ptr,
+        types::Arr,
+        types::Initializer,
+        types::CallSign,
         types::Continue,
         types::Structure,
+        types::SizeOf,
         types::Get>
         val;
     parser::SourceLocation loc = {};

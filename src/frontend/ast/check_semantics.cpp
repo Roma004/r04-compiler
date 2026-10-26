@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cassert>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -77,17 +78,6 @@ make_integer_type(TypeTable &tb, uint8_t size, bool is_signed) {
 }
 
 /**
- * @brief apply the C integer promotions to a single operand
- *
- * Integer types with a rank lower than `int` promote to `int32_t`, while
- * wider types are left unchanged.
- */
-static node_type promoted_integer_type(TypeTable &tb, const type_info &info) {
-    if (info.size < 4) return make_integer_type(tb, 4, true);
-    return make_integer_type(tb, info.size, info.is_signed);
-}
-
-/**
  * @brief usual arithmetic conversion of two integer operands
  *
  * Both operands undergo the integer promotions first. The result has the size
@@ -130,20 +120,13 @@ static node_type boolean_type(TypeTable &tb) {
     return make_integer_type(tb, 4, true);
 }
 
-/** @brief whether @p a is written before @p b in the source */
-static bool source_before(
-    const parser::SourceLocation &a, const parser::SourceLocation &b
-) noexcept {
-    return a.line < b.line || (a.line == b.line && a.column < b.column);
-}
-
 /**
  * @brief get the type of the value a pointer or an array gives access to
  *
  * Modifiers are applied from right to left, so the last one is the outermost
  * and it is the one a subscription or a dereference removes. The `const` of
  * that level belongs to the removed object and is dropped together with it
- * (`uint32_t * const` -> `uint32_t`).
+ * (`uint32_t const *` -> `uint32_t`).
  */
 static std::optional<node_type> pointee_type(const node_type &type) {
     if (type.mods.empty()) return std::nullopt;
@@ -218,9 +201,9 @@ struct context {
     bool check_function(node fn);
     bool check_block(node blk);
     bool check_stmt(node stmt);
-    bool check_assign_target(node target);
     bool check_expr(node expr);
 
+    bool check_assignment(node expr);
     bool check_binary_op(node expr);
     bool check_unary_op(node expr);
     bool check_subscript(node expr);
@@ -234,7 +217,7 @@ struct context {
 
     bool check_type_exists(node type);
 
-    void insert_error(const std::string &msg, const loc_t &loc);
+    bool insert_error(const std::string &msg, const loc_t &loc);
     void remove_node(node n);
 };
 
@@ -289,61 +272,23 @@ std::optional<node_type> context::make_node_type(node n) {
     type_info &base_type = get_type(ts.name);
     node_type type{.type_id = base_type.type_id};
 
-    std::vector<node> modifiers;
-    for (auto e : n->forward_edges()) modifiers.push_back(e->target());
+    for (auto e : n->forward_edges()) {
+        auto &e_data = e->get_data();
+        if (e_data.data < types::TypeSpec::DIM0) continue;
 
-    // The parser attaches a leading `const` after the other modifiers, so the
-    // edge order does not always match the source order. Sort by location to
-    // process the modifiers in the order they are written in.
-    std::ranges::sort(modifiers, [](node a, node b) {
-        return source_before(a->get_data().loc, b->get_data().loc);
-    });
-
-    // `const` qualifies the type construct written next to its right, so a
-    // leading `const` qualifies the base type while any other one qualifies
-    // the pointer or array which follows it. A trailing `const` qualifies the
-    // whole type, i.e. its outermost level.
-    bool pending_const = false;
-    bool base_done = false;
-
-    auto push_base = [&]() noexcept {
-        if (base_done) return;
-        type.is_const = pending_const;
-        pending_const = false;
-        base_done = true;
-    };
-
-    for (node mod : modifiers) {
-        const node_t &mod_data = mod->get_data();
-
-        // only `const` may be written before the name of the type
-        if (!base_done && source_before(mod_data.loc, n_data.loc)) {
-            assert(mod_data.is<types::Const>());
-            pending_const = true;
-            continue;
-        }
-
-        push_base();
-
-        if (mod_data.is<types::Ptr>()) {
-            type.insert_pointer(pending_const);
-            pending_const = false;
-        } else if (mod_data.is<types::Const>()) {
-            pending_const = true;
-        } else {
-            auto idx_o = reduce_constant(mod);
+        node dim = e->target();
+        if (dim->get_data().is<types::Ptr>()) {
+            type.insert_pointer(dim->get_data().get<types::Ptr>().is_const);
+        } else if (dim->get_data().is<types::Arr>()) {
+            auto idx_o = reduce_constant(dim);
             if (!idx_o) return std::nullopt;
-            type.insert_array((size_t)*idx_o, pending_const);
-            pending_const = false;
+            type.insert_array(
+                (size_t)*idx_o, dim->get_data().get<types::Arr>().is_const
+            );
+        } else {
+            assert(false && "invlaid node type");
         }
     }
-
-    push_base();
-
-    // `pending_const` is still set only when the base type was already
-    // pushed, which means the `const` had nothing on its right and qualifies
-    // the type as a whole
-    if (pending_const) type.insert_const();
 
     return type;
 }
@@ -369,38 +314,18 @@ bool context::define_type(node n) {
 
     type_info &new_tp = get_type(type_id);
 
-    bool has_body = n_data.get<types::Structure>().has_body;
-    node fields_container = n;
-
-    // The parser attaches a structure body as a `Block` (the same way it does
-    // for functions), so unwrap it to reach the field declarations.
-    if (!has_body) {
-        for (auto e : n->forward_edges()) {
-            if (e->get_data().data < types::Structure::FIELD0) continue;
-            node target = e->target();
-            if (target->get_data().is<types::Block>()) {
-                has_body = true;
-                fields_container = target;
-                break;
-            }
-        }
-    }
-
     // if type has no body, no other attions required
-    if (!has_body) return true;
+    if (!n_data.get<types::Structure>().has_body) return true;
 
     // check if type is fully defined and if so, raise exception
     if (new_tp.size != 0) {
-        insert_error("redefinition of type " + t_data.name, n_data.loc);
-        return false;
+        return insert_error("redefinition of type " + t_data.name, n_data.loc);
     }
 
     // then define the fields of the type
-    for (auto e : fields_container->forward_edges()) {
+    for (auto e : n->forward_edges()) {
         // search for start of field nodes
-        if (fields_container == n
-            && e->get_data().data < types::Structure::FIELD0)
-            continue;
+        if (e->get_data().data < types::Structure::FIELD0) continue;
 
         // current node is declareation of new field
         node decl = e->target();
@@ -414,20 +339,18 @@ bool context::define_type(node n) {
         decl->get_data().type = *field_type;
 
         if (field_type->size_of(pctx.ast.types) == 0) {
-            insert_error(
+            return insert_error(
                 "type of field " + decl_data.name + " is not fully defined",
                 decl->get_data().loc
             );
-            return false;
         }
 
         // add field to type
         const std::string &name = decl_data.name;
         if (!new_tp.add_field(name, *field_type, pctx.ast.types)) {
-            insert_error(
+            return insert_error(
                 "field with such name already defined", field->get_data().loc
             );
-            return false;
         }
     }
 
@@ -445,8 +368,9 @@ type_info &context::get_type(unsigned idx) { return pctx.ast.types.get(idx); }
 bool context::check_type_exists(node type) {
     std::string &name = type->get_data().get<types::TypeSpec>().name;
     if (!pctx.ast.types.has_type(name)) {
-        insert_error("type " + name + " is not defined", type->get_data().loc);
-        return false;
+        return insert_error(
+            "type " + name + " is not defined", type->get_data().loc
+        );
     }
     return true;
 }
@@ -460,8 +384,9 @@ bool context::define_name(node nd) {
     if (!(n.type = make_node_type(decl_type))) return false;
 
     if (!insert_name(name, nd)) {
-        insert_error(std::format("redefinition of name `{}`", name), n.loc);
-        return false;
+        return insert_error(
+            std::format("redefinition of name `{}`", name), n.loc
+        );
     }
 
     remove_node(decl_type);
@@ -473,8 +398,9 @@ bool context::define_function(node n) {
     assert(d.is<types::Declare>());
     auto &name = d.get<types::Declare>().name;
     if (!insert_function(name, n)) {
-        insert_error(std::format("redefinition of function `{}`", name), d.loc);
-        return false;
+        return insert_error(
+            std::format("redefinition of function `{}`", name), d.loc
+        );
     }
     return true;
 }
@@ -498,8 +424,9 @@ bool context::is_function_defined(std::string_view name) {
     return get_function(name) != nullptr;
 }
 
-void context::insert_error(const std::string &msg, const loc_t &loc) {
+bool context::insert_error(const std::string &msg, const loc_t &loc) {
     pctx.errors.emplace_back(msg, loc);
+    return false;
 }
 
 bool context::is_in_cycle(int level) const {
@@ -542,7 +469,7 @@ context::get_name_from_layer(std::string_view name, ctx_layer *layer) {
 }
 
 ctx_layer::name_data &context::get_name(std::string_view name) {
-    for (auto &l : var_ctx) {
+    for (auto &l : std::ranges::views::reverse(var_ctx)) {
         if (auto *n = get_name_from_layer(name, &l)) return *n;
     }
 
@@ -579,8 +506,7 @@ bool context::check_global_names() {
         if (d.is<types::Declare>()) {
             define_name(stmt);
         } else if (d.is<types::Assign>()) {
-            if (!define_name(get_node(stmt, types::Assign::LEFT))) continue;
-            check_expr(get_node(stmt, types::Assign::RIGHT));
+            check_assignment(stmt);
         } else if (d.is<types::Structure>()) {
             define_type(stmt);
             to_remove.push_back(stmt);
@@ -663,54 +589,35 @@ bool context::check_stmt(node stmt) {
     node_t &d = stmt->get_data();
 
     if (d.is<types::Block>()) { return check_block(stmt); }
-
     if (d.is<types::Declare>()) { return define_name(stmt); }
+    if (d.is<types::Assign>()) { return check_assignment(stmt); }
 
-    if (d.is<types::Assign>()) {
-        node right = get_node(stmt, types::Assign::RIGHT);
-        check_expr(right);
-
-        node left = get_node(stmt, types::Assign::LEFT);
-        if (left->get_data().is<types::Declare>()) return define_name(left);
-
-        // Compound assignment is parsed as `lhs = (lhs op rhs)`, where the
-        // assignment target is a childless copy of the binary operation's
-        // left operand. Reuse that operand's type for the copy.
-        if (right->get_data().is<types::BinaryOp>()
-            && left->forward_edges().empty()) {
-            node operand = get_node(right, types::BinaryOp::LEFT);
-            const auto &operand_data = operand->get_data();
-            const auto &left_data = left->get_data();
-            if (operand_data.loc.line == left_data.loc.line
-                && operand_data.loc.column == left_data.loc.column
-                && operand_data.val.index() == left_data.val.index()) {
-                if (operand_data.type)
-                    left->get_data().type = operand_data.type;
-                return check_assign_target(left);
-            }
-        }
-
-        if (!check_expr(left)) return false;
-        return check_assign_target(left);
+    if (d.is<types::Return>()) {
+        // TODO: check if return statement type is equal to function return type
+        return check_expr(get_node(stmt, 0));
     }
 
-    if (d.is<types::Return>()) { return check_expr(get_node(stmt, 0)); }
-
     if (d.is<types::If>()) {
-        bool res;
+        bool ok;
         for (edge e : stmt->forward_edges()) {
-            if (e->get_data().data == types::If::COND)
-                res &= check_expr(e->target());
-            else res &= check_stmt(e->target());
+            if (e->get_data().data == types::If::COND) {
+                ok &= check_expr(e->target());
+                // TODO: need to check if e->target() of integral, non-array and
+                // non-pointer type
+            } else ok &= check_stmt(e->target());
         }
-        return res;
+        return ok;
     }
 
     if (d.is<types::For>()) {
         push_layer(d, /* is_cycle */ true);
+        bool ok;
         for (edge e : stmt->forward_edges()) {
-            if (e->get_data().data == types::For::COND) check_expr(e->target());
-            else check_stmt(e->target());
+            if (e->get_data().data == types::For::COND) {
+                ok &= check_expr(e->target());
+                // TODO: need to check if e->target() of integral, non-array and
+                // non-pointer type
+            } else ok &= check_stmt(e->target());
         }
         pop_layer();
         return true;
@@ -723,20 +630,6 @@ bool context::check_stmt(node stmt) {
 
     check_expr(stmt);
     return true;
-}
-
-bool context::check_assign_target(node target) {
-    const auto &type = target->get_data().type;
-
-    // the type is unknown only when the target itself failed to type-check,
-    // and that failure is reported by its own analysis
-    if (!type) return false;
-
-    const char *error = assign_error(*type);
-    if (error == nullptr) return true;
-
-    insert_error(error, target->get_data().loc);
-    return false;
 }
 
 bool context::check_expr(node expr) {
@@ -753,8 +646,7 @@ bool context::check_expr(node expr) {
             d.type = fn->decl->get_data().type;
             return true;
         }
-        insert_error(std::format("undefined name `{}`", name), d.loc);
-        return false;
+        return insert_error(std::format("undefined name `{}`", name), d.loc);
     }
 
     if (d.is<types::CharLiteral>()) {
@@ -773,9 +665,8 @@ bool context::check_expr(node expr) {
         return true;
     }
 
-    // declarations are annotated by `define_name` / `define_type`
-    if (d.is<types::Declare>()) return d.type.has_value();
-
+    if (d.is<types::Assign>()) return check_assignment(expr);
+    if (d.is<types::Declare>()) return define_name(expr);
     if (d.is<types::BinaryOp>()) return check_binary_op(expr);
     if (d.is<types::UnaryOp>()) return check_unary_op(expr);
     if (d.is<types::Subscript>()) return check_subscript(expr);
@@ -789,6 +680,23 @@ bool context::check_expr(node expr) {
     return true;
 }
 
+bool context::check_assignment(node expr) {
+    node right = get_node(expr, types::Assign::RIGHT);
+    if (!check_expr(right)) return false;
+
+    node left = get_node(expr, types::Assign::LEFT);
+    if (!check_expr(left)) return false;
+
+    // TODO: need to implement check_assignment function:
+    // * types of left and right must be strictly equal if right is not a
+    //   literal
+    // * if right is literal, it must be implicuty converted to the type
+    //   of left
+    // * if left is const type or an array - it may not be assigned
+
+    return true;
+}
+
 bool context::check_binary_op(node expr) {
     node_t &d = expr->get_data();
     const std::string &op = d.get<types::BinaryOp>().op;
@@ -797,39 +705,51 @@ bool context::check_binary_op(node expr) {
     node left = get_node(expr, types::BinaryOp::LEFT);
     node right = get_node(expr, types::BinaryOp::RIGHT);
 
-    bool ok = check_expr(left);
-    ok &= check_expr(right);
+    if (!check_expr(left)) return false;
+    if (!check_expr(right)) return false;
 
-    const bool is_boolean = op == "||" || op == "&&" || op == "==" || op == "!="
-                         || op == "<" || op == ">" || op == "<=" || op == ">=";
-
-    if (is_boolean) {
-        d.type = boolean_type(tb);
-        return ok;
-    }
-
+    // till this moment types of left and right must be determined already
+    // if not, something is wrong with other functions
     const auto &left_type = left->get_data().type;
     const auto &right_type = right->get_data().type;
-    if (!left_type || !right_type) return false;
+    assert(left_type);
+    assert(right_type);
 
+    // binary operations is for integer-type operands only
     const type_info *left_info = as_integer(*left_type, tb);
     const type_info *right_info = as_integer(*right_type, tb);
     if (!left_info || !right_info) {
-        insert_error(
-            std::format("invalid operands to binary operator `{}`", op), d.loc
+        return insert_error(
+            std::format(
+                "invalid operands `{}` and `{}` to binary operator `{}`",
+                left_type->repr(tb),
+                right_type->repr(tb),
+                op
+            ),
+            d.loc
         );
-        d.type = make_integer_type(tb, 4, true);
-        return false;
     }
 
-    // shifts keep the promoted type of the left operand
-    if (op == "<<" || op == ">>") {
-        d.type = promoted_integer_type(tb, *left_info);
-        return ok;
+    // list of boolean operations
+    if (op == "||" || op == "&&" || op == "==" || op == "!=" || op == "<"
+        || op == ">" || op == "<=" || op == ">=") {
+        // logic operation is of boolean type
+        d.type = boolean_type(tb);
+        // if size_of(left_type) != size_of(right_type) promote the shorter one
+        // to the wider one
+        return true;
+    } else if (op == "<<" || op == ">>") {
+        // shifts is of the same type as left operand
+        d.type = left_type;
+        return true;
+    } else {
+        // arithmetic operations result is of widest type
+        d.type = common_integer_type(tb, *left_type, *right_type);
+        // if size_of(left_type) != size_of(right_type) promote the shorter one
+        // to the wider one
     }
 
-    d.type = common_integer_type(tb, *left_type, *right_type);
-    return ok;
+    return true;
 }
 
 bool context::check_unary_op(node expr) {
@@ -838,27 +758,32 @@ bool context::check_unary_op(node expr) {
     TypeTable &tb = pctx.ast.types;
 
     node arg = get_node(expr, types::UnaryOp::ARG);
-    bool ok = check_expr(arg);
+    if (!check_expr(arg)) return false;
+
+    const auto &arg_type = arg->get_data().type;
+    assert(arg_type);
+
+    // the only check required is that the type is integer
+    const type_info *info = as_integer(*arg_type, tb);
+    if (!info) {
+        return insert_error(
+            std::format(
+                "invalid operand of type `{}` to unary operator `{}`",
+                arg_type->repr(tb),
+                op
+            ),
+            d.loc
+        );
+        d.type = make_integer_type(tb, 4, true);
+    }
 
     if (op == "!") {
         d.type = boolean_type(tb);
-        return ok;
+        return true;
     }
 
-    const auto &arg_type = arg->get_data().type;
-    if (!arg_type) return false;
-
-    const type_info *info = as_integer(*arg_type, tb);
-    if (!info) {
-        insert_error(
-            std::format("invalid operand to unary operator `{}`", op), d.loc
-        );
-        d.type = make_integer_type(tb, 4, true);
-        return false;
-    }
-
-    d.type = promoted_integer_type(tb, *info);
-    return ok;
+    d.type = arg_type;
+    return true;
 }
 
 bool context::check_subscript(node expr) {
@@ -867,162 +792,166 @@ bool context::check_subscript(node expr) {
     node value = get_node(expr, types::Subscript::VALUE);
     node index = get_node(expr, types::Subscript::IDX);
 
-    bool ok = check_expr(value);
-    ok &= check_expr(index);
+    if (!check_expr(value)) return false;
+    if (!check_expr(index)) return false;
 
     const auto &value_type = value->get_data().type;
-    if (!value_type) return false;
+    assert(value_type);
 
-    auto element = pointee_type(*value_type);
-    if (!element) {
-        insert_error("subscripted value is not an array or a pointer", d.loc);
-        return false;
+    auto element_type = pointee_type(*value_type);
+    if (!element_type) {
+        return insert_error(
+            "subscripted value is not an array or a pointer", d.loc
+        );
     }
 
     const auto &index_type = index->get_data().type;
     if (index_type && !as_integer(*index_type, pctx.ast.types)) {
-        insert_error("subscript index is not an integer", d.loc);
-        ok = false;
+        return insert_error("subscript index is not an integer", d.loc);
     }
 
-    d.type = *element;
-    return ok;
+    d.type = *element_type;
+    return true;
 }
 
 bool context::check_deref(node expr) {
     node_t &d = expr->get_data();
 
     node value = get_node(expr, 0);
-    bool ok = check_expr(value);
+    if (!check_expr(value)) return false;
 
     const auto &value_type = value->get_data().type;
-    if (!value_type) return false;
+    assert(value_type);
 
-    auto element = pointee_type(*value_type);
-    if (!element) {
-        insert_error("cannot dereference a non-pointer value", d.loc);
-        return false;
+    auto element_type = pointee_type(*value_type);
+    if (!element_type) {
+        return insert_error("cannot dereference a non-pointer value", d.loc);
     }
 
-    d.type = *element;
-    return ok;
+    d.type = *element_type;
+    return false;
 }
 
 bool context::check_addr(node expr) {
     node_t &d = expr->get_data();
 
+    // TODO: check if we are able to get address of value.
+    // address may be taken from any in-memory value:
+    // * ID (including function), Deref -- is always valid
+    // * Get, Subscript -- is only valid when the object is not temporary (not
+    //   returned by function)
+    // * Cast -- valid if cast of one of mentioned
+    // pointer arithmetic is not allowed, so &(a + b) is never valid
+
     node value = get_node(expr, 0);
-    bool ok = check_expr(value);
+    if (!check_expr(value)) return false;
 
     const auto &value_type = value->get_data().type;
-    if (!value_type) return false;
+    assert(value_type);
 
     d.type = *value_type;
-    d.type->insert_pointer();
-    return ok;
+    // make the type a constant pointer to the type the address is taken of
+    // type_t const *ptr; - means ptr is not assignable, but *ptr does
+    d.type->insert_pointer(true);
+    return true;
 }
 
 bool context::check_get(node expr) {
     node_t &d = expr->get_data();
     const std::string &member = d.get<types::Get>().name;
+    TypeTable &tb = pctx.ast.types;
 
-    const auto deref_edge = find_edge(expr, types::Get::DEREF);
-    const auto base_edge = find_edge(expr, types::Get::BASE);
+    node base = get_node(expr, types::Get::BASE);
 
-    const bool from_deref = deref_edge != expr->forward_edges().end();
-    const auto source_edge = from_deref ? deref_edge : base_edge;
-    if (source_edge == expr->forward_edges().end()) {
-        // malformed member access (no base expression) - nothing to deduce
-        return false;
+    // no matter which type is base, if check is true, the type is determined.
+    if (!check_expr(base)) return false;
+
+    const auto &base_type = base->get_data().type;
+    if (!base_type) return false;
+
+    if (!base_type->mods.empty() || base_type->is_function(tb)) {
+        return insert_error(
+            std::format(
+                "member access on a non-struct value of type `{}`",
+                base_type->repr(tb)
+            ),
+            d.loc
+        );
     }
 
-    node source = (*source_edge)->target();
-    bool ok = check_expr(source);
-
-    const auto &source_type = source->get_data().type;
-    if (!source_type) return false;
-
-    if (!source_type->mods.empty()) {
-        insert_error("member access on a non-struct value", d.loc);
-        return false;
-    }
-
-    const type_info &base = pctx.ast.types.get(source_type->type_id);
-    if (base.is_integral || base.is_function) {
-        insert_error("member access on a non-struct value", d.loc);
-        return false;
-    }
-
-    auto field =
-        std::ranges::find_if(base.fields, [&member](const type_info::field &f) {
-            return f.name == member;
-        });
-    if (field == base.fields.end()) {
-        insert_error(std::format("no member named `{}`", member), d.loc);
-        return false;
+    const type_info &base_info = get_type(base_type->type_id);
+    auto field = std::ranges::find_if(
+        base_info.fields,
+        [&member](const type_info::field &f) { return f.name == member; }
+    );
+    if (field == base_info.fields.end()) {
+        return insert_error(
+            std::format(
+                "type `{}` has no member named `{}`",
+                base_type->repr(tb),
+                member
+            ),
+            d.loc
+        );
     }
 
     d.type = field->type;
-    return ok;
+    return true;
 }
 
 bool context::check_cast(node expr) {
     node_t &d = expr->get_data();
 
     node value = get_node(expr, types::Cast::VALUE);
-    bool ok = check_expr(value);
+    if (!check_expr(value)) return false;
+
+    // TODO: check if expression realy may be casted into this type
 
     node type_node = get_node(expr, types::Cast::TYPE);
     auto cast_type = make_node_type(type_node);
     if (cast_type) d.type = *cast_type;
-    else ok = false;
+    else return false;
 
-    return ok;
+    return true;
 }
 
 bool context::check_call(node expr) {
     node_t &d = expr->get_data();
     TypeTable &tb = pctx.ast.types;
-    bool ok = true;
 
     node callee = get_node(expr, types::Call::EXPR);
-    node_t &callee_data = callee->get_data();
 
-    if (!callee_data.is<types::ID>()) {
-        insert_error("call target must be an identifier", callee_data.loc);
-        check_expr(callee);
-        ok = false;
-    } else {
-        const std::string &name = callee_data.get<types::ID>().name;
-        if (ctx_layer::name_data *fn = get_function(name)) {
-            auto &fn_type = fn->decl->get_data().type;
-            if (fn_type) {
-                callee_data.type = fn_type;
-                d.type = fn_type->return_type(tb);
-            }
-        } else {
-            insert_error(
-                std::format("unknown function `{}`", name), callee_data.loc
-            );
-            ok = false;
-        }
-    }
-
+    // check if call arguments (including callee type) are valid expressions
     for (edge e : expr->forward_edges()) {
-        if (e->get_data().data == types::Call::EXPR) continue;
-        ok &= check_expr(e->target());
+        if (!check_expr(e->target())) return false;
     }
 
-    return ok;
+    // now all the types are determined
+    const auto &fn_type = callee->get_data().type;
+    assert(fn_type);
+
+    if (!fn_type->is_function(tb))
+        return insert_error(
+            std::format(
+                "attempt to call non-function type `{}`", fn_type->repr(tb)
+            ),
+            d.loc
+        );
+
+    // TODO: check if type of expression is the same as function expects to be
+    // passed, implicit cast is not allowed it this context
+
+    d.type = fn_type->return_type(tb);
+    return true;
 }
 
 bool Ast::check_semantics(parser::ParserContext &ctx) {
     context c{.pctx = ctx};
 
     lang_char_t = node_type{.type_id = types.get_id("int8_t")};
-    lang_string_t = node_type{.type_id = types.get_id("int8_t")};
-    lang_string_t.insert_const();
-    lang_string_t.insert_pointer();
+    lang_string_t =
+        node_type{.type_id = types.get_id("int8_t"), .is_const = true};
+    lang_string_t.insert_pointer(true);
 
     c.check_global_names();
     return ctx.errors.empty();

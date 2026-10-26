@@ -87,13 +87,18 @@ Literal::Literal(std::string_view sv) {
         digits.remove_prefix(2);
     } else if (
         digits.size() > 2 && digits[0] == '0'
+        && (digits[1] == 'o' || digits[1] == 'O')
+    ) {
+        base = 8;
+        digits.remove_prefix(2);
+    } else if (
+        digits.size() > 2 && digits[0] == '0'
         && (digits[1] == 'b' || digits[1] == 'B')
     ) {
         base = 2;
         digits.remove_prefix(2);
     } else if (digits.size() > 1 && digits[0] == '0') {
         base = 8;
-        digits.remove_prefix(1);
     }
 
     size_t suffix_start = digits.find_first_not_of("0123456789abcdefABCDEF");
@@ -103,23 +108,30 @@ Literal::Literal(std::string_view sv) {
         digits = digits.substr(0, suffix_start);
     }
 
+    bool has_u = false, has_l = false, has_s = false, has_ss = false;
+    for (char c : suffix) {
+        if (c == 'u' || c == 'U') has_u = true;
+        else if (c == 'l' || c == 'L') has_l = true;
+        else if (c == 's' || c == 'S') {
+            if (has_s) has_ss = true;
+            else has_s = true;
+        }
+    }
+
+    if (has_s && has_l) throw std::runtime_error("invalid integer literal");
+
+    if (has_ss) size = 1;
+    else if (has_s) size = 2;
+    else if (has_l) size = 8;
+    else size = 4;
+
+    is_signed = !has_u;
+
     uint64_t val = 0;
     auto [ptr, ec] = std::from_chars(
         digits.data(), digits.data() + digits.size(), val, base
     );
     if (ec != std::errc{}) throw std::runtime_error("invalid integer literal");
-
-    bool has_u = false, has_l = false, has_ll = false;
-    for (char c : suffix) {
-        if (c == 'u' || c == 'U') has_u = true;
-        else if (c == 'l' || c == 'L') {
-            if (has_l) has_ll = true;
-            else has_l = true;
-        }
-    }
-
-    size = has_l ? 8 : 4;
-    is_signed = !has_u;
 
     value = val & mask_for_size(size);
 }
@@ -218,37 +230,4 @@ Literal Literal::apply(std::string_view op) const {
 }
 #undef APPLY
 
-TypeSpec::TypeSpec(std::string_view sv) : name(sv), attrs(0) {
-    if (sv == "void_t") {
-        attrs |= INTEGRAL;
-        size = 1;
-    } else if (sv == "bool_t") {
-        attrs |= INTEGRAL;
-        size = 4;
-    } else if (sv == "uint8_t") {
-        attrs |= INTEGRAL;
-        size = 1;
-    } else if (sv == "uint16_t") {
-        attrs |= INTEGRAL;
-        size = 2;
-    } else if (sv == "uint32_t") {
-        attrs |= INTEGRAL;
-        size = 4;
-    } else if (sv == "uint64_t") {
-        attrs |= INTEGRAL;
-        size = 8;
-    } else if (sv == "int8_t") {
-        attrs |= INTEGRAL | SIGNED;
-        size = 1;
-    } else if (sv == "int16_t") {
-        attrs |= INTEGRAL | SIGNED;
-        size = 2;
-    } else if (sv == "int32_t") {
-        attrs |= INTEGRAL | SIGNED;
-        size = 4;
-    } else if (sv == "int64_t") {
-        attrs |= INTEGRAL | SIGNED;
-        size = 8;
-    }
-}
 }; // namespace frontend::ast::types

@@ -2,6 +2,8 @@
 
 #include "frontend/ast/types.hpp"
 #include "frontend/parser/context.hpp"
+#include <type_traits>
+#include <variant>
 
 namespace frontend::parser {
 
@@ -66,7 +68,7 @@ inline node make_struct_def(CTX, str sv, str id) {
     return res;
 }
 
-inline node make_struct_decl(CTX, str sv, str id, char, list &&fields, char) {
+inline node make_struct_decl(CTX, str sv, str id, str, list &&fields, char) {
     auto def = make_struct_def(ctx, sv, id);
     def->get_data().get<types::Structure>().has_body = true;
     int idx = types::Structure::FIELD0;
@@ -94,8 +96,8 @@ inline node make_dereference(CTX, str sv, node value) {
     return res;
 }
 
-inline node make_subscript(CTX, node lv, char, node rv, char) {
-    auto res = create_node<types::Subscript>(ctx, lv->get_data().loc);
+inline node make_subscript(CTX, node lv, str sv, node rv, char) {
+    auto res = create_node<types::Subscript>(ctx, sv2loc(sv));
     ctx.ast.emplace_edge(res, lv, types::Subscript::VALUE);
     ctx.ast.emplace_edge(res, rv, types::Subscript::IDX);
     return res;
@@ -104,8 +106,8 @@ inline node make_subscript(CTX, node lv, char, node rv, char) {
 inline node make_edge_member(CTX, node base, str, str id) {
     auto res = create_node<types::Get>(ctx, sv2loc(id), id);
     auto deref = create_node<types::Deref>(ctx, sv2loc(id));
-    ctx.ast.emplace_edge(deref, base, 0);
-    ctx.ast.emplace_edge(res, deref, 1);
+    ctx.ast.emplace_edge(deref, base, types::Deref::BASE);
+    ctx.ast.emplace_edge(res, deref, types::Get::BASE);
     return res;
 }
 
@@ -192,28 +194,36 @@ inline node make_for(
 }
 // clang-format on
 
-inline node add_const(CTX, node type, str sv) {
+inline node add_const_to_type(CTX, str sv, node type) {
     // TODO: if already add, insert warning
-    auto child = create_node<types::Const>(ctx, sv2loc(sv));
-    ctx.ast.emplace_edge(type, child, type->forward_edges().size());
-    return type;
-}
-
-inline node add_const_left(CTX, str sv, node type) {
-    // TODO: if already add, insert warning
-    auto child = create_node<types::Const>(ctx, sv2loc(sv));
-    ctx.ast.emplace_edge(type, child, type->forward_edges().size());
+    type->get_data().get<types::TypeSpec>().add_const();
     return type;
 }
 
 inline node add_deref(CTX, node type, str sv) {
-    auto child = create_node<types::Ptr>(ctx, sv2loc(sv));
+    auto child = create_node<types::Ptr>(ctx, sv2loc(sv), false);
     ctx.ast.emplace_edge(type, child, type->forward_edges().size());
     return type;
 }
 
-inline node add_subscript(CTX, node type, char, node expr, char) {
-    ctx.ast.emplace_edge(type, expr, type->forward_edges().size());
+inline node add_call_sign(CTX, node type, char, list args, char) {
+    auto child = create_node<types::CallSign>(ctx, type->get_data().loc);
+    for (node arg : args)
+        ctx.ast.emplace_edge(child, arg, child->forward_edges().size());
+    ctx.ast.emplace_edge(type, child, type->forward_edges().size());
+    return type;
+}
+
+inline node add_const_deref(CTX, node type, str, str sv) {
+    auto child = create_node<types::Ptr>(ctx, sv2loc(sv), true);
+    ctx.ast.emplace_edge(type, child, type->forward_edges().size());
+    return type;
+}
+
+inline node add_subscript(CTX, node type, str sv, node expr, char) {
+    auto child = create_node<types::Arr>(ctx, sv2loc(sv), false);
+    ctx.ast.emplace_edge(child, expr, types::Arr::SIZE);
+    ctx.ast.emplace_edge(type, child, type->forward_edges().size());
     return type;
 }
 
@@ -243,6 +253,28 @@ inline node make_binary_assign(ParserContext &ctx, node l, str op, node r) {
 inline node make_unary_op(ParserContext &ctx, str op, node r) {
     auto res = create_node<types::UnaryOp>(ctx, sv2loc(op), op);
     ctx.ast.emplace_edge(res, r, 0);
+    return res;
+}
+
+inline node make_nullptr(CTX, str sv) {
+    auto literal = create_node<types::Literal>(ctx, sv2loc(sv), "0uL");
+    auto type = create_node<types::TypeSpec>(ctx, sv2loc(sv), "void_t");
+    add_deref(ctx, type, sv);
+    node cast = make_cast(ctx, 0, type, 0, literal);
+    return cast;
+}
+
+inline node make_sizeof(CTX, str sv, char, node expr, char) {
+    auto res = create_node<types::SizeOf>(ctx, sv2loc(sv));
+    ctx.ast.emplace_edge(res, expr, types::SizeOf::OF);
+    return res;
+}
+
+inline node make_initializer(CTX, str sv, list l, char) {
+    auto res = create_node<types::Initializer>(ctx, sv2loc(sv));
+    for (node n : l) {
+        ctx.ast.emplace_edge(res, n, res->forward_edges().size());
+    }
     return res;
 }
 

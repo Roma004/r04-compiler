@@ -144,7 +144,7 @@ struct Subscript {
 
 struct Deref {
     AST_EXPR;
-    EDGE_NAMES();
+    EDGE_NAMES(BASE);
 
     std::string repr() const { return "deref"; }
 };
@@ -158,12 +158,26 @@ struct Addr {
 
 struct Get {
     AST_EXPR;
-    EDGE_NAMES(BASE, DEREF);
+    EDGE_NAMES(BASE);
 
     std::string name;
     Get(std::string_view sv) : name(sv) {}
 
     std::string repr() const { return "get: " + name; }
+};
+
+struct SizeOf {
+    AST_EXPR;
+    EDGE_NAMES(OF);
+
+    std::string repr() const { return "sizeof"; }
+};
+
+struct Initializer {
+    AST_EXPR;
+    EDGE_NAMES(EXPR0);
+
+    std::string repr() const { return "init_list"; }
 };
 
 struct BinaryOp {
@@ -190,54 +204,42 @@ struct TypeSpec {
     AST_STMT;
     EDGE_NAMES(DIM0);
 
-    enum OFST {
-        CONST_OFST = 1,
-        SIGNED_OFST = 3,
-        INTEGRAL_OFST = 4,
-    };
-    enum MASK {
-        CONST = 1 << OFST::CONST_OFST,
-        SIGNED = 1 << OFST::SIGNED_OFST,
-        INTEGRAL = 1 << OFST::INTEGRAL_OFST,
-    };
-    enum { PTR = -1 };
     std::string name;
-    unsigned size = 1;
-    uint8_t attrs = 0;
+    bool is_const = false;
 
-    TypeSpec(std::string_view sv);
+    TypeSpec(std::string_view sv) : name(sv) {}
 
-    constexpr bool is_signed() const noexcept {
-        return (attrs & SIGNED) >> SIGNED_OFST;
-    }
-    constexpr bool is_const() const noexcept {
-        return (attrs & CONST) >> CONST_OFST;
-    }
-    constexpr bool is_intagral() const noexcept {
-        return (attrs & INTEGRAL) >> INTEGRAL_OFST;
-    }
-    constexpr void add_const() noexcept { attrs |= CONST; }
+    constexpr void add_const() noexcept { is_const = true; }
 
     std::string repr() const {
-        std::string res;
-        if (attrs & CONST) res += "const ";
-        return res + name;
+        if (is_const) return "const " + name;
+        return name;
     }
 };
 
-struct Const {
+struct CallSign {
     AST_STMT;
-    EDGE_NAMES();
+    EDGE_NAMES(ARG0);
 
-    std::string repr() const { return "const"; }
+    std::string repr() const { return "call_types"; }
 };
 
-/** pointer modifier of a type specification */
 struct Ptr {
     AST_STMT;
     EDGE_NAMES();
 
+    bool is_const = false;
+
     std::string repr() const { return "ptr"; }
+};
+
+struct Arr {
+    AST_STMT;
+    EDGE_NAMES(SIZE);
+
+    bool is_const = false;
+
+    std::string repr() const { return "arr"; }
 };
 
 struct Cast {

@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <regex>
 #include <string_view>
 
 #include <frontend/ast/ast.hpp>
@@ -12,7 +13,7 @@ enum class Stage { Syntax, SyntaxSemantic };
 
 void print_usage(std::string_view prog) {
     std::cout << "usage: " << prog
-              << " [--syntax|--syntax-semantic|--syntax-semantic-IR] "
+              << " [--syntax|--syntax-semantic] "
                  "<filename>"
               << std::endl;
 }
@@ -26,12 +27,7 @@ Stage parse_args(int argc, char **argv, const char *&filename) {
 
         if (arg == "--syntax") {
             stage = Stage::Syntax;
-        } else if (arg == "--syntax-semantic" || arg == "--semantic") {
-            stage = Stage::SyntaxSemantic;
-        } else if (arg == "--syntax-semantic-IR" || arg == "--ir") {
-            // IR output is not implemented yet; run the deepest available
-            // stage so the option is at least accepted.
-            // TODO: add the real IR pipeline here.
+        } else if (arg == "--semantic") {
             stage = Stage::SyntaxSemantic;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
@@ -39,19 +35,19 @@ Stage parse_args(int argc, char **argv, const char *&filename) {
         } else if (!arg.empty() && arg[0] == '-') {
             std::cerr << "unknown option: " << arg << std::endl;
             print_usage(argv[0]);
-            std::exit(2);
+            std::exit(3);
         } else if (filename == nullptr) {
             filename = argv[i];
         } else {
             std::cerr << "unexpected argument: " << arg << std::endl;
             print_usage(argv[0]);
-            std::exit(2);
+            std::exit(4);
         }
     }
 
     if (filename == nullptr) {
         print_usage(argv[0]);
-        std::exit(2);
+        std::exit(5);
     }
 
     return stage;
@@ -70,9 +66,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    static const std::regex re(R"(//[^\n]*)");
+
     std::string input;
     std::string rd;
-    while (std::getline(fin, rd)) input += rd + '\n';
+    while (std::getline(fin, rd))
+        input += std::regex_replace(rd, re, "") + '\n';
 
     frontend::parser::ParserContext ctx(input);
 

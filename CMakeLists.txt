@@ -42,7 +42,7 @@ file(GLOB_RECURSE SRC_FILES "${PROJECT_SOURCE_DIR}/src/**/*.cpp")
 add_library(frontend_parser STATIC ${SRC_FILES})
 target_compile_options(
     frontend_parser PUBLIC
-    "-DCTPG_TABLE_FILE=\"${CMAKE_CURRENT_BINARY_DIR}/frontend_parser_table.ctpg/frontend_parser_table.bin\""
+    "-DCTPG_TABLE_DATA=frontend_parser_table"
     --coverage
 )
 
@@ -56,15 +56,16 @@ ctpg_add_parser_table(
     HEADER          ${PROJECT_SOURCE_DIR}/include/frontend/parser/context.hpp
     TABLE           frontend::parser::get_parse_table
     SYMBOL          frontend_parser_table
-    NAMESPACE       frontend::parser
     LINK_LIBRARIES  frontend_parser
 )
 
 add_executable(parser parse.cpp)
 target_link_libraries(parser PRIVATE frontend_parser)
+target_link_libraries(parser PRIVATE frontend_parser_table)
 add_dependencies(parser frontend_parser_table)
 
 target_link_libraries(${ALL_TESTS} PRIVATE frontend_parser)
+target_link_libraries(${ALL_TESTS} PRIVATE frontend_parser_table)
 target_compile_definitions(${ALL_TESTS} PRIVATE
     PARSER_BINARY_PATH="$<TARGET_FILE:parser>"
     TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"

@@ -9,11 +9,6 @@ void node_type::insert_pointer(bool is_const) {
     mods.push_back({.kind = modifier::Kind::Pointer, .is_const = is_const});
 }
 
-void node_type::insert_const() {
-    if (mods.empty()) is_const = true;
-    else mods.back().is_const = true;
-}
-
 void node_type::insert_array(size_t count, bool is_const) {
     mods.push_back(
         {.kind = modifier::Kind::Array, .count = count, .is_const = is_const}

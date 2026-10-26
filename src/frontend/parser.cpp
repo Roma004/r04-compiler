@@ -1,18 +1,18 @@
 #include <iostream>
 #include <optional>
 
-#include "frontend/ast/types.hpp"
-#include "frontend/parser/context.hpp"
-#include "frontend/parser/rules.hpp"
-#include "frontend/parser/source_map.hpp"
-
-#ifndef CTPG_TABLE_FILE
-#define CTPG_TABLE_FILE "frontend_parser_table_data.bin"
+#ifndef CTPG_TABLE_DATA
+#define CTPG_TABLE_DATA frontend_parser_table
 #endif
 
 #include <ctpg/ctpg.hpp>
 #include <ctpg/parse-table.hpp>
-#include <ctpg/parse-table/mapped.hpp>
+#include <ctpg/parse-table/static.hpp>
+
+#include "frontend/ast/types.hpp"
+#include "frontend/parser/context.hpp"
+#include "frontend/parser/rules.hpp"
+#include "frontend/parser/source_map.hpp"
 
 #define DECL_REGEX_TERM(_name, regex_str)         \
     constexpr char _name##_pattern[] = regex_str; \
@@ -51,10 +51,11 @@
     nterm()                >>= create<list>{},   \
     nterm(nterm, of_nterm)  >= push_back<1, 2>{} \
 
-#define SEQUENCE_OF_SEP(nterm, of_nterm, sep)             \
+#define SEQUENCE_OF_SEP(nterm, of_nterm, sep)    \
     nterm()                >>= create<list>{},   \
-    nterm(nterm, of_nterm, sep)  >= push_back<1, 2>{} \
-    // clang-format on
+    nterm(nterm, of_nterm, sep)  >= push_back<1, 2>{}
+
+// clang-format on
 
 namespace frontend::parser {
 
@@ -87,10 +88,11 @@ DECL_REGEX_TERM(id, "[A-Za-z_][0-9A-Za-z_]*");
 DECL_REGEX_TERM(type_id, "[A-Za-z_][0-9A-Za-z_]*_t");
 DECL_REGEX_TERM(
     num_literal,
-    "[1-9][0-9]*([uU]([lL][lL]?)?|[lL][lL]?[uU]?)?"
-    "|0[xX][0-9a-fA-F]+([uU]([lL][lL]?)?|[lL][lL]?[uU]?)?"
-    "|0[bB][01]+([uU]([lL][lL]?)?|[lL][lL]?[uU]?)?"
-    "|0[0-7]*([uU]([lL][lL]?)?|[lL][lL]?[uU]?)?"
+    "(?:[1-9][0-9]*"
+    "|0[oO][0-7]+"
+    "|0[xX][0-9a-fA-F]+"
+    "|0[bB][01]+"
+    "|0[0-7]*)[uU]?(?:[sS][sS]?|[lL]?)"
 );
 
 DECL_KEYWORD(if);
@@ -101,6 +103,8 @@ DECL_KEYWORD(const);
 DECL_KEYWORD(break);
 DECL_KEYWORD(continue);
 DECL_KEYWORD(struct);
+DECL_KEYWORD(nullptr);
+DECL_KEYWORD(sizeof);
 
 DECL_SIGN_ASSOC(assign, "=", prior::ASSIGN, rtol);
 DECL_SIGN_ASSOC(deref, "*", prior::DEREF, ltor);
@@ -121,7 +125,6 @@ DECL_NODE_NTERM(decl);
 DECL_NODE_NTERM(decl_assign);
 DECL_NODE_NTERM(decl_function);
 DECL_NODE_NTERM(decl_struct);
-DECL_NODE_NTERM(struct_block);
 DECL_NTERM(for_cond, std::optional<node>);
 
 DECL_LIST_NTERM(call_args);
@@ -129,6 +132,10 @@ DECL_LIST_NTERM(call_args_ne);
 DECL_LIST_NTERM(decl_list);
 DECL_LIST_NTERM(decl_list_ne);
 DECL_LIST_NTERM(stmt_list);
+DECL_LIST_NTERM(expr_list);
+DECL_LIST_NTERM(expr_list_ne);
+DECL_LIST_NTERM(type_list);
+DECL_LIST_NTERM(type_list_ne);
 DECL_LIST_NTERM(for_init);
 DECL_LIST_NTERM(for_init_ne);
 DECL_LIST_NTERM(for_step);
@@ -138,7 +145,7 @@ DECL_LIST_NTERM(struct_fields);
 // clang-format off
 ctpg::parser p(program,
 terms(
-    KEYWORDS(const, if, else, for, return, break, continue, struct),
+    KEYWORDS(const, if, else, for, return, break, continue, struct, nullptr, sizeof),
     term::chr_literal,
     term::str_literal,
     term::num_literal,
@@ -148,15 +155,16 @@ terms(
     "||", "&&", "|", "^", "&", "==", "!=", "<", ">", "<=", ">=", ">>", "<<",
     "+", "-", "*", "/", "%", "~", "!", "|=", "^=", "&=", ">>=", "<<=", "+=",
     "-=", "*=", "/=", "%=",
-    '(', ')', '[', ']', "{", '}', ';', ','
+    '(', ')', "[", ']', "{", '}', ';', ','
 ),
 nterms(
     program, global_stmt, expr, type_spec, decl, decl_list, decl_list_ne,
     decl_function, decl_assign, block, stmt_list, stmt, call_args, expr_assign,
     call_args_ne, for_init, for_init_ne, for_cond, for_step, for_step_ne,
-    decl_struct, struct_block, struct_fields
+    decl_struct, struct_fields, expr_list, expr_list_ne, type_list, type_list_ne
 ),
 rules(
+/* - 0 ---------------------------------------------------------------------- */
     /** program is list of global statements */
     program()                     >>= make_root,
     program(program, global_stmt) >>= add_global_stmt,
@@ -168,11 +176,10 @@ rules(
      * - declaration of function
      * - declaration of function with body
      */
-    global_stmt(decl_assign, ';')           >= _e1,
-    global_stmt(decl_function, ';')         >= _e1,
-    global_stmt(decl_struct, ';')           >= _e1,
-    global_stmt(decl_struct, struct_block) >>= connect_with_body,
-    global_stmt(decl_function, block)      >>= connect_with_body,
+    global_stmt(decl_assign, ';')      >= _e1,
+    global_stmt(decl_function, ';')    >= _e1,
+    global_stmt(decl_struct, ';')      >= _e1,
+    global_stmt(decl_function, block) >>= connect_with_body,
 
     /**
      * `decl` is a declaration of name preceeded with type
@@ -191,22 +198,17 @@ rules(
      */
     decl_function(decl, '(',  decl_list, ')') >>= make_fn_decl,
 
+/* - 10 --------------------------------------------------------------------- */
     /**
      * structure might be declared as just a name or as a list of declarations
      */
-    decl_struct(KWD(struct), term::type_id) >>= make_struct_def,
-    struct_block("{", struct_fields, '}') >>= make_block,
-    SEQUENCE_OF_SEP(struct_fields, decl, ';'),
+    decl_struct(KWD(struct), term::type_id)                          >>= make_struct_def,
+    decl_struct(KWD(struct), term::type_id, "{", struct_fields, '}') >>= make_struct_decl,
 
     /**
      * `block` is a list of statements wrapped into '{', '}'
      */
     block("{", stmt_list, '}')            >>= make_block,
-
-    /**
-     * `stmt_list` is a sequence of local context stetements
-     */
-    SEQUENCE_OF(stmt_list, stmt),
 
     /**
      * `stmt` is any statement in local context. it might be:
@@ -226,6 +228,7 @@ rules(
     stmt(KWD(return), ';')       >>= create_kwd<types::Return>,
     stmt(KWD(break), ';')        >>= create_kwd<types::Break>,
     stmt(KWD(continue), ';')     >>= create_kwd<types::Continue>,
+/* - 20 --------------------------------------------------------------------- */
 
     stmt(KWD(if), '(', expr, ')', stmt)                  >>= make_if,
     stmt(KWD(if), '(', expr, ')', stmt, KWD(else), stmt) >>= make_if_else,
@@ -243,11 +246,19 @@ rules(
      * right, so `const int32_t *` points to a const value, while
      * `int32_t const *` is a const pointer.
      */
-    type_spec(term::type_id)             >>= create_from_sv<types::TypeSpec>,
-    type_spec(KWD(const), type_spec)     >>= add_const_left,
-    type_spec(type_spec, KWD(const))     >>= add_const,
-    type_spec(type_spec, SGN(deref))     >>= add_deref,
-    type_spec(type_spec, '[', expr, ']') >>= add_subscript,
+    type_spec(term::type_id)                     >>= create_from_sv<types::TypeSpec>,
+    type_spec(KWD(const), type_spec)             >>= add_const_to_type,
+    type_spec(type_spec, SGN(deref))             >>= add_deref,
+    type_spec(type_spec, KWD(const), SGN(deref)) >>= add_const_deref,
+    type_spec(type_spec, "[", expr, ']')         >>= add_subscript,
+    type_spec(type_spec, '(', type_list, ')')    >>= add_call_sign,
+
+/* - 30 --------------------------------------------------------------------- */
+    /**
+     * `expr_assign` is ether an expr or assignment of two exprs.
+     */
+    expr_assign(expr)                     >= _e1,
+    expr_assign(expr, SGN(assign), expr) >>= make_assign,
 
     /**
      * Expression is one of:
@@ -263,21 +274,26 @@ rules(
      * - call of the function
      * - expression inside parenthness
      */
-    expr(term::num_literal)             >>= create_from_sv<types::Literal>,
-    expr(term::chr_literal)             >>= create_from_sv<types::CharLiteral>,
-    expr(term::str_literal)             >>= create_from_sv<types::StringLiteral>,
-    expr(term::id)                      >>= create_from_sv<types::ID>,
-    expr(SGN(addr), expr)               >>= make_address,
-    expr(SGN(deref), expr)              >>= make_dereference,
-    expr(expr, '[', expr, ']')          >>= make_subscript,
-    expr(expr, SGN(dot), term::id)      >>= make_dot_member,
-    expr(expr, SGN(edge), term::id)     >>= make_edge_member,
-    expr('(', type_spec, ')', expr)     >>= make_cast,
-    expr('(', expr, ')')                 >= _e2,
-    expr(expr, '(', call_args, ')')     >>= make_call,
-    expr("-", expr)[term::prior::UNARY] >>= make_unary_op,
-    expr("~", expr)[term::prior::UNARY] >>= make_unary_op,
-    expr("!", expr)[term::prior::UNARY] >>= make_unary_op,
+    expr(term::num_literal)                >>= create_from_sv<types::Literal>,
+    expr(term::chr_literal)                >>= create_from_sv<types::CharLiteral>,
+    expr(term::str_literal)                >>= create_from_sv<types::StringLiteral>,
+    expr(term::id)                         >>= create_from_sv<types::ID>,
+    expr(KWD(nullptr))                     >>= make_nullptr,
+    expr(KWD(sizeof), '(', expr, ')')      >>= make_sizeof,
+    expr(KWD(sizeof), '(', type_spec, ')') >>= make_sizeof,
+    expr(SGN(addr), expr)                  >>= make_address,
+    expr(SGN(deref), expr)                 >>= make_dereference,
+/* - 40 --------------------------------------------------------------------- */
+    expr(expr, "[", expr, ']')             >>= make_subscript,
+    expr(expr, SGN(dot), term::id)         >>= make_dot_member,
+    expr(expr, SGN(edge), term::id)        >>= make_edge_member,
+    expr('(', type_spec, ')', expr)        >>= make_cast,
+    expr('(', expr, ')')                    >= _e2,
+    expr(expr, '(', call_args, ')')        >>= make_call,
+    expr("[", expr_list, ']')              >>= make_initializer,
+    expr("-", expr)[term::prior::UNARY]    >>= make_unary_op,
+    expr("~", expr)[term::prior::UNARY]    >>= make_unary_op,
+    expr("!", expr)[term::prior::UNARY]    >>= make_unary_op,
     expr(expr, "||", expr)[term::prior::LOR  ] >>= make_binary_op,
     expr(expr, "&&", expr)[term::prior::LAND ] >>= make_binary_op,
     expr(expr, "|",  expr)[term::prior::BOR  ] >>= make_binary_op,
@@ -307,32 +323,17 @@ rules(
     expr(expr, "/=",  expr)[term::prior::ASSIGN] >>= make_binary_assign,
     expr(expr, "%=",  expr)[term::prior::ASSIGN] >>= make_binary_assign,
 
-    /**
-     * `decl_assign` is ether an expr or assignment of two exprs.
-     */
-    expr_assign(expr)                     >= _e1,
-    expr_assign(expr, SGN(assign), expr) >>= make_assign,
+    SEQUENCE_OF(stmt_list, stmt),
+    SEQUENCE_OF_SEP(struct_fields, decl, ';'),
 
-    /**
-     * `decl_list` is a list of declarations separated by ',', which may be
-     * a sequence of function arguments
-     */
     LIST_OF(decl_list, decl, ','),
-
-    /**
-     * `call_args` is a list of non-typed expression separated by `,`
-     */
     LIST_OF(call_args, expr, ','),
-
-    /**
-     * `for_init` is a list of declarations whick may have default values
-     */
     LIST_OF(for_init, decl_assign, ','),
+    LIST_OF(for_step, expr_assign, ','),
+    LIST_OF(type_list, type_spec, ','),
 
-    /**
-     * `for_step` is a list of expressions
-     */
-    LIST_OF(for_step, expr_assign, ',')
+    LIST_OF(expr_list, expr, ','),
+    expr_list_ne(expr_list_ne, ',') >= _e1
 ));
 // clang-format on
 

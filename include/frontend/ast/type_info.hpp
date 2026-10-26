@@ -31,14 +31,15 @@ struct node_type {
     unsigned type_id = 0;
     bool is_const = false;
 
-    /** put a pointer on top of the current type */
-    void insert_pointer(bool is_const = false);
+    /**
+     * @brief put a pointer on top of the current type
+     *
+     * @param is_const   wether pointer itself might be assigned
+     */
+    void insert_pointer(bool is_const);
 
     /** put an array on top of the current type */
-    void insert_array(size_t count, bool is_const = false);
-
-    /** qualify the outermost level (the base type if there is none) as const */
-    void insert_const();
+    void insert_array(size_t count, bool is_const);
 
     bool is_function(const TypeTable &tb) const noexcept;
     node_type return_type(const TypeTable &tb) const;
