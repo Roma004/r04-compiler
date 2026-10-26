@@ -1,6 +1,0 @@
-void_t printi(int32_t num);
-
-int32_t main() {
-    printi(1;
-    return 0;
-}

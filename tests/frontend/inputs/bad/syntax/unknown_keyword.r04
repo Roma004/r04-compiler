@@ -1,6 +1,0 @@
-int32_t main() {
-    while (1) {
-        break;
-    }
-    return 0;
-}

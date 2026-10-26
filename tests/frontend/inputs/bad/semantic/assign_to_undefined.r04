@@ -1,4 +1,0 @@
-int32_t main() {
-    x = 1;
-    return 0;
-}

@@ -1,4 +1,0 @@
-int32_t main() {
-    foo();
-    return 0;
-}

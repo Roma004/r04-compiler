@@ -1,6 +1,0 @@
-void_t prints(const int8_t *str);
-
-int32_t main() {
-    prints("oops);
-    return 0;
-}
