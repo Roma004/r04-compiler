@@ -3,6 +3,7 @@
 #include <concepts>
 #include <format>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #define HAS_NOEXCEPT_COPY(T)    std::is_nothrow_copy_constructible_v<T>
@@ -12,16 +13,17 @@
 
 #define FOR_EACH_ONE(pref, suf, name) pref##name##suf
 
-#define FE_1(P, S, x)       FOR_EACH_ONE(P, S, x)
-#define FE_2(P, S, x, ...)  FOR_EACH_ONE(P, S, x), FE_1(P, S, __VA_ARGS__)
-#define FE_3(P, S, x, ...)  FOR_EACH_ONE(P, S, x), FE_2(P, S, __VA_ARGS__)
-#define FE_4(P, S, x, ...)  FOR_EACH_ONE(P, S, x), FE_3(P, S, __VA_ARGS__)
-#define FE_5(P, S, x, ...)  FOR_EACH_ONE(P, S, x), FE_4(P, S, __VA_ARGS__)
-#define FE_6(P, S, x, ...)  FOR_EACH_ONE(P, S, x), FE_5(P, S, __VA_ARGS__)
-#define FE_7(P, S, x, ...)  FOR_EACH_ONE(P, S, x), FE_6(P, S, __VA_ARGS__)
-#define FE_8(P, S, x, ...)  FOR_EACH_ONE(P, S, x), FE_7(P, S, __VA_ARGS__)
-#define FE_9(P, S, x, ...)  FOR_EACH_ONE(P, S, x), FE_8(P, S, __VA_ARGS__)
-#define FE_10(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_9(P, S, __VA_ARGS__)
+// clang-format off
+#define FE_1(P, S, x)      FOR_EACH_ONE(P, S, x)
+#define FE_2(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_1 (P, S, __VA_ARGS__)
+#define FE_3(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_2 (P, S, __VA_ARGS__)
+#define FE_4(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_3 (P, S, __VA_ARGS__)
+#define FE_5(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_4 (P, S, __VA_ARGS__)
+#define FE_6(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_5 (P, S, __VA_ARGS__)
+#define FE_7(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_6 (P, S, __VA_ARGS__)
+#define FE_8(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_7 (P, S, __VA_ARGS__)
+#define FE_9(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_8 (P, S, __VA_ARGS__)
+#define FE_10(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_9 (P, S, __VA_ARGS__)
 #define FE_11(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_10(P, S, __VA_ARGS__)
 #define FE_12(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_11(P, S, __VA_ARGS__)
 #define FE_13(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_12(P, S, __VA_ARGS__)
@@ -33,7 +35,27 @@
 #define FE_19(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_18(P, S, __VA_ARGS__)
 #define FE_20(P, S, x, ...) FOR_EACH_ONE(P, S, x), FE_19(P, S, __VA_ARGS__)
 
-// clang-format off
+#define FC_1(fn, x)      fn(x)
+#define FC_2(fn, x, ...) fn(x), FC_1 (fn, __VA_ARGS__)
+#define FC_3(fn, x, ...) fn(x), FC_2 (fn, __VA_ARGS__)
+#define FC_4(fn, x, ...) fn(x), FC_3 (fn, __VA_ARGS__)
+#define FC_5(fn, x, ...) fn(x), FC_4 (fn, __VA_ARGS__)
+#define FC_6(fn, x, ...) fn(x), FC_5 (fn, __VA_ARGS__)
+#define FC_7(fn, x, ...) fn(x), FC_6 (fn, __VA_ARGS__)
+#define FC_8(fn, x, ...) fn(x), FC_7 (fn, __VA_ARGS__)
+#define FC_9(fn, x, ...) fn(x), FC_8 (fn, __VA_ARGS__)
+#define FC_10(fn, x, ...) fn(x), FC_9 (fn, __VA_ARGS__)
+#define FC_11(fn, x, ...) fn(x), FC_10(fn, __VA_ARGS__)
+#define FC_12(fn, x, ...) fn(x), FC_11(fn, __VA_ARGS__)
+#define FC_13(fn, x, ...) fn(x), FC_12(fn, __VA_ARGS__)
+#define FC_14(fn, x, ...) fn(x), FC_13(fn, __VA_ARGS__)
+#define FC_15(fn, x, ...) fn(x), FC_14(fn, __VA_ARGS__)
+#define FC_16(fn, x, ...) fn(x), FC_15(fn, __VA_ARGS__)
+#define FC_17(fn, x, ...) fn(x), FC_16(fn, __VA_ARGS__)
+#define FC_18(fn, x, ...) fn(x), FC_17(fn, __VA_ARGS__)
+#define FC_19(fn, x, ...) fn(x), FC_18(fn, __VA_ARGS__)
+#define FC_20(fn, x, ...) fn(x), FC_19(fn, __VA_ARGS__)
+
 #define NARG(...)                               \
     NARG_(                                      \
         __VA_ARGS__,                            \
@@ -53,6 +75,9 @@
 
 #define FOR_EACH(pref, suf, ...) \
     CAT(FE_, NARG(__VA_ARGS__))(pref, suf, __VA_ARGS__)
+
+#define FOR_EACH_CALL(fn, ...) \
+    CAT(FC_, NARG(__VA_ARGS__))(fn, __VA_ARGS__)
 
 namespace helpers {
 using std::to_string;
@@ -83,9 +108,30 @@ inline std::string dot_escape(std::string_view s) {
             case '"':  out += "\\\""; break;
             case '\n': out += "\\n";  break;
             case '\r': out += "\\r";  break;
+            case '<': out += "\\<";   break;
+            case '>': out += "\\>";   break;
             default:   out += c;      break;
         }
     }
+    return out;
+}
+
+struct StringHash {
+    using is_transparent = void;
+
+    size_t operator()(std::string_view sv) const noexcept {
+        return std::hash<std::string_view>{}(sv);
+    }
+};
+
+template <typename ValueT>
+using string_map = std::unordered_map<
+    std::string, ValueT, StringHash, std::equal_to<>
+>;
+
+inline std::string to_lower_str(std::string_view sv) {
+    std::string out(sv);
+    for (auto &c : out) c = std::tolower(c);
     return out;
 }
 
