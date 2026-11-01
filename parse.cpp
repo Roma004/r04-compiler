@@ -1,42 +1,117 @@
-#include "frontend/ast/ast.hpp"
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <regex>
+#include <string_view>
 
-#include <frontend/parser.hpp>
+#include <frontend/ast/ast.hpp>
+#include <frontend/parser/context.hpp>
 
-int main(void) {
-    using std::to_string;
-    std::string input = "";
-    std::string rd = "";
-    while (std::getline(std::cin, rd)) input += rd + '\n';
-    std::fstream fout;
+namespace {
 
-    frontend::parser::ParserContext ctx(input);
+enum class Stage { Syntax, SyntaxSemantic };
 
-    if (!ctx.parse()) std::cerr << "Invalid input!" << std::endl;
+void print_usage(std::string_view prog) {
+    std::cout << "usage: " << prog
+              << " [--syntax|--syntax-semantic] "
+                 "<filename>"
+              << std::endl;
+}
 
-    if (!ctx.errors.empty()) {
-        for (auto &msg : ctx.errors) {
-            std::cerr << std::format(
-                "Syntax Error: `{}` at: {}:{}",
-                msg.msg,
-                msg.loc.line,
-                msg.loc.column
-            ) << std::endl;
+Stage parse_args(int argc, char **argv, const char *&filename) {
+    Stage stage = Stage::SyntaxSemantic;
+    filename = nullptr;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string_view arg = argv[i];
+
+        if (arg == "--syntax") {
+            stage = Stage::Syntax;
+        } else if (arg == "--semantic") {
+            stage = Stage::SyntaxSemantic;
+        } else if (arg == "--help" || arg == "-h") {
+            print_usage(argv[0]);
+            std::exit(0);
+        } else if (!arg.empty() && arg[0] == '-') {
+            std::cerr << "unknown option: " << arg << std::endl;
+            print_usage(argv[0]);
+            std::exit(3);
+        } else if (filename == nullptr) {
+            filename = argv[i];
+        } else {
+            std::cerr << "unexpected argument: " << arg << std::endl;
+            print_usage(argv[0]);
+            std::exit(4);
         }
     }
 
+    if (filename == nullptr) {
+        print_usage(argv[0]);
+        std::exit(5);
+    }
+
+    return stage;
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+    const char *filename = nullptr;
+    Stage stage = parse_args(argc, argv, filename);
+
+    std::ifstream fin;
+    fin.open(filename);
+    if (!fin) {
+        std::cerr << "cannot open file: " << filename << std::endl;
+        return 1;
+    }
+
+    static const std::regex re(R"(//[^\n]*)");
+
+    std::string input;
+    std::string rd;
+    while (std::getline(fin, rd))
+        input += std::regex_replace(rd, re, "") + '\n';
+
+    frontend::parser::ParserContext ctx(input);
+
+    if (!ctx.parse()) {
+        std::cerr << "Invalid input!" << std::endl;
+        return 1;
+    }
+
+    int ret = 0;
+    if (stage == Stage::SyntaxSemantic) {
+        if (!ctx.ast.check_semantics(ctx)) {
+            for (auto &msg : ctx.errors) {
+                std::cerr << std::format(
+                    "Semantic Error: `{}` at: {}:{}",
+                    msg.msg,
+                    msg.loc.line,
+                    msg.loc.column
+                ) << std::endl;
+            }
+            ret = 1;
+        }
+    }
+
+    std::fstream fout;
     fout.open("asd.dot", std::ios_base::out);
     ctx.ast.to_dot(
         fout,
-        [](const auto &n) -> helpers::DOTList {
-            return {{"label", frontend::ast::to_string(n)}};
+        /* node attrs */ {{"shape", "record"}},
+        /* node conv  */
+        [&ctx](const auto &n) -> helpers::DOTList {
+            return {
+                {"label", ctx.ast.repr_node(n)},
+            };
         },
-        [](const auto &e) -> helpers::DOTList {
-            return {{"label", frontend::ast::to_string(e)}};
+        /* edge conv  */
+        [&ctx](const auto &e) -> helpers::DOTList {
+            return {{"label", ctx.ast.repr_edge(e)}};
         }
     );
     fout.close();
 
-    return 0;
+    return ret;
 }

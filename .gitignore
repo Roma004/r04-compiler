@@ -1,6 +1,9 @@
 build/
 .vim/
+.vscode/
 .cache/
+.continue/
+.continueignore
 compile_commands.json
 *asd*
 scripts/
