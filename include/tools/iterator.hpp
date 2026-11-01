@@ -9,11 +9,11 @@
 namespace tools {
 
 template <typename Ctx>
-concept IteratorContext = requires(Ctx ctx, const Ctx &const_ctx) {
+concept IteratorContext = requires(Ctx &ctx) {
     typename Ctx::value_type;
     { ctx.next() } -> std::same_as<void>;
-    { ctx.get() } -> std::same_as<typename Ctx::value_type &>;
-    { const_ctx == const_ctx } -> std::same_as<bool>;
+    &Ctx::get;
+    &Ctx::operator==;
 };
 
 #define ITERATOR_TEMPLATE template <IteratorContext content_type, bool is_const>

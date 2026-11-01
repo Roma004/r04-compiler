@@ -55,9 +55,8 @@ template <size_t size> struct bitset {
     int_type val = 0;
 };
 
-template <size_t size>
-constexpr unsigned bitset<size>::count() const noexcept {
-    return __builtin_popcountg(val);
+template <size_t size> constexpr unsigned bitset<size>::count() const noexcept {
+    return __builtin_popcountll((unsigned long long)val);
 }
 
 template <size_t size> constexpr void bitset<size>::clear() noexcept {
@@ -75,13 +74,13 @@ template <size_t size> constexpr bool bitset<size>::is_empty() const noexcept {
 template <size_t size>
 constexpr ssize_t bitset<size>::find_free_idx() const noexcept {
     if (is_full()) return -1;
-    return __builtin_ctzg((int_type)~val);
+    return __builtin_ctzll((unsigned long long)(int_type)~val);
 }
 
 template <size_t size>
 constexpr ssize_t bitset<size>::find_used_idx() const noexcept {
     if (is_empty()) return -1;
-    return __builtin_ctzg(val);
+    return __builtin_ctzll((unsigned long long)val);
 }
 
 template <size_t size>

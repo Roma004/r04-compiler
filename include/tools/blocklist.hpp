@@ -112,15 +112,13 @@ template <typename T, size_t blk_size = 64> class blocklist {
 
   private:
     using list_iterator = typename list_t::iterator;
-    using block_iterator = typename block_t::iterator;
     using const_list_iterator = typename list_t::const_iterator;
-    using const_block_iterator = typename block_t::const_iterator;
 
     iterator find_empty() noexcept;
     void erase_block(typename list_t::iterator);
     iterator make_block();
 
-    iterator make_iter(list_iterator, block_iterator) noexcept;
+    template <typename BlkIt> iterator make_iter(list_iterator, BlkIt) noexcept;
     iterator make_iter(list_iterator) noexcept;
 
     list_t blocks;
@@ -142,9 +140,10 @@ BLOCKLIST_TEMPLATE
 bool BLOCKLIST::iterator_content::operator==(
     const iterator_content &other
 ) const noexcept {
-    return lst_it == other.lst_it
-        && const_cast<iterator_content &>(*this).get_idx()
-               == const_cast<iterator_content &>(other).get_idx();
+    if (lst_it != other.lst_it) return false;
+    if (blk_idx == (size_t)-1 && other.blk_idx == (size_t)-1) return true;
+    return const_cast<iterator_content &>(*this).get_idx()
+        == const_cast<iterator_content &>(other).get_idx();
 }
 
 BLOCKLIST_TEMPLATE
@@ -251,8 +250,9 @@ typename BLOCKLIST::const_iterator BLOCKLIST::end() const noexcept {
 }
 
 BLOCKLIST_TEMPLATE
+template <typename BlkIt>
 typename BLOCKLIST::iterator
-BLOCKLIST::make_iter(list_iterator lst_it, block_iterator blk_it) noexcept {
+BLOCKLIST::make_iter(list_iterator lst_it, BlkIt blk_it) noexcept {
     size_t idx = lst_it->idx_of(blk_it);
     return iterator({lst_it, idx});
 }
