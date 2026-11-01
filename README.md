@@ -1,6 +1,7 @@
 # Проектирование компилятора
 
 Чтобы собрать проект:
+
 ```sh
 mkdir build && cd build
 cmake ..
@@ -8,14 +9,13 @@ make
 ```
 
 Чтобы запустить тесты:
+
 ```sh
-make all_tests
-# или
-make
 ./all_tests
 ```
 
 Посмотреть покрытие кода:
+
 ```sh
 make coverage          # формирует gcovr отчёт
 make show-coverage     # формирует отчёт и открывает в браузере чрез xdg-open
@@ -24,13 +24,19 @@ make show-coverage     # формирует отчёт и открывает в 
 # Синтаксический разбор
 
 Для сборки парсера
+
 ```sh
 cd build
 make parser
 ```
+## Пример
 
 Пример реализации функции main из задания лабораторной на описанном языке:
+
 ```c
+void_t prints(const int8_t *str);
+void_t printi(int32_t num);
+
 int32_t main(int32_t argc, uint8_t **argv) {
     int32_t i = 0;
     for (; i < argc;) {
@@ -54,13 +60,23 @@ int32_t main(int32_t argc, uint8_t **argv) {
     return 0;
 }
 ```
+## Полученное в результате синтаксического анализа AST
+![ast](./docs/img/semantic_ast.png)
 
-Полученное в результате синтаксического анализа AST:
-![syntax\_ast.png](./docs/img/syntax_ast.png)
+## Полученное в результате семантического анализа AST
+![ast](./docs/img/semantic_ast.png)
 
-Запуск парсера для кода из примера:
+## Запуск парсера для кода из примера:
+
 ```sh
 cd build
-cat ../tests/frontend/syntax/inputs/lab2.r04 | ./parser && dot -Tpng asd.dot -o syntax_ast.png
-xdg-open syntax_ast.png
+
+# запуск только синтаксического разбора
+./parser --syntax ../tests/frontend/inputs/example/lab.lsp 
+
+# запуск полного анализа
+./parser ../tests/frontend/inputs/example/lab.lsp
+
+# сформировать AST в формате png 
+dot -Tpng asd.dot -o ast.png && xdg-open ast.png
 ```

@@ -754,7 +754,7 @@ bool context::check_expr(node expr, const node_type *as_type, const_policy p) {
 
     else if (d.is<types::StringLiteral>()) {
         node_type type{.type_id = types().get_id("int8_t"), ._is_const = true};
-        type.insert_pointer(true);
+        type.insert_pointer(false);
         d.type = type;
     }
 

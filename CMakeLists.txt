@@ -18,14 +18,16 @@ add_definitions("-DAST_REMOVE_UNUSED_NODES")
 # tests
 find_package(Catch2 REQUIRED)
 
-file(GLOB_RECURSE TEST_FILES "${PROJECT_SOURCE_DIR}/tests/**/*.cpp")
-set(ALL_TESTS all_tests)
+set(TOOLS_TESTS tools_tests)
+set(COMPILER parser)
 
-add_executable(${ALL_TESTS} ${TEST_FILES})
-target_link_libraries(${ALL_TESTS} PRIVATE Catch2::Catch2WithMain)
-target_compile_options(${ALL_TESTS} PRIVATE --coverage)
-target_link_options(${ALL_TESTS} PRIVATE --coverage)
-add_test(NAME ${ALL_TESTS} COMMAND ${ALL_TESTS})
+file(GLOB_RECURSE TEST_FILES "${PROJECT_SOURCE_DIR}/tests/tools/*.cpp")
+
+add_executable(${TOOLS_TESTS} ${TEST_FILES})
+target_link_libraries(${TOOLS_TESTS} PRIVATE Catch2::Catch2WithMain)
+target_compile_options(${TOOLS_TESTS} PRIVATE --coverage)
+target_link_options(${TOOLS_TESTS} PRIVATE --coverage)
+add_test(NAME ${TOOLS_TESTS} COMMAND ${TOOLS_TESTS})
 
 add_library(ctpg INTERFACE)
 target_include_directories(ctpg INTERFACE
@@ -59,18 +61,10 @@ ctpg_add_parser_table(
     LINK_LIBRARIES  frontend_parser
 )
 
-add_executable(parser parse.cpp)
-target_link_libraries(parser PRIVATE frontend_parser)
-target_link_libraries(parser PRIVATE frontend_parser_table)
-add_dependencies(parser frontend_parser_table)
-
-target_link_libraries(${ALL_TESTS} PRIVATE frontend_parser)
-target_link_libraries(${ALL_TESTS} PRIVATE frontend_parser_table)
-target_compile_definitions(${ALL_TESTS} PRIVATE
-    PARSER_BINARY_PATH="$<TARGET_FILE:parser>"
-    TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
-)
-add_dependencies(${ALL_TESTS} parser frontend_parser_table)
+add_executable(${COMPILER} parse.cpp)
+target_link_libraries(${COMPILER} PRIVATE frontend_parser)
+target_link_libraries(${COMPILER} PRIVATE frontend_parser_table)
+add_dependencies(${COMPILER} frontend_parser_table)
 
 # compile commands
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
@@ -80,6 +74,34 @@ if (EXISTS ${CMAKE_CURRENT_BINARY_DIR}/${cmp_cmd_file})
                    ${CMAKE_CURRENT_SOURCE_DIR}/${cmp_cmd_file}
                    COPYONLY)
 endif()
+
+set(COMPILIER_TESTS_SCRIPT "${PROJECT_SOURCE_DIR}/tests/frontend/run_tests.py")
+
+add_custom_target(test-tools
+    COMMAND ${TOOLS_TESTS}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "run tests for tools library"
+    DEPENDS ${TOOLS_TESTS}
+)
+
+add_custom_target(test-syntax
+    COMMAND python ${COMPILIER_TESTS_SCRIPT}
+        --compiler ${COMPILER}
+        --mode syntax
+        --tests-dir ${PROJECT_SOURCE_DIR}/tests/frontend/inputs
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "run tests for parsing language syntax"
+    DEPENDS ${COMPILER}
+)
+
+add_custom_target(test-semantic
+    COMMAND python ${COMPILIER_TESTS_SCRIPT}
+        --compiler ${COMPILER}
+        --tests-dir ${PROJECT_SOURCE_DIR}/tests/frontend/inputs
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "run tests for parsing language syntax and semantic"
+    DEPENDS ${COMPILER}
+)
 
 # coverage
 find_program(GCOVR gcovr)
@@ -91,7 +113,7 @@ if(GCOVR)
         COMMAND rm -rf ${COVERAGE_DIR}
         COMMAND find ${CMAKE_BINARY_DIR} -name '*.gcda' -delete
         COMMAND mkdir -p ${COVERAGE_HTML}
-        COMMAND ${ALL_TESTS}
+        COMMAND ${TOOLS_TESTS}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${COVERAGE_DIR}
         COMMAND ${GCOVR} --html --html-details -o ${COVERAGE_HTML}/index.html
             --root=${PROJECT_SOURCE_DIR}
@@ -99,7 +121,7 @@ if(GCOVR)
             --filter="${PROJECT_SOURCE_DIR}/include/"
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating coverage report with gcovr"
-        DEPENDS ${ALL_TESTS}
+        DEPENDS ${TOOLS_TESTS}
     )
 
     # Открыть в браузере
