@@ -1,27 +1,27 @@
-#include "frontend/ast/type_info.hpp"
+#include "contract/hir/type_info.hpp"
 
 #include <cassert>
 #include <string>
 #include <utility>
 
-namespace frontend::ast {
+namespace contract::hir {
 
-void node_type::insert_pointer(bool is_const) {
+void object_type::insert_pointer(bool is_const) {
     mods.push_back({.kind = modifier::Kind::Pointer, .is_const = is_const});
 }
 
-void node_type::insert_array(size_t count) {
+void object_type::insert_array(size_t count) {
     mods.push_back(
         {.kind = modifier::Kind::Array, .count = count, .is_const = false}
     );
 }
 
-const node_type &node_type::return_type(const TypeTable &tb) const {
+const object_type &object_type::return_type(const TypeTable &tb) const {
     assert(is_function(tb));
     return tb.get(type_id).return_type;
 }
 
-size_t node_type::size_of(const TypeTable &tb) const noexcept {
+size_t object_type::size_of(const TypeTable &tb) const noexcept {
     size_t sz = tb.get(type_id).size;
     for (const auto &m : mods) {
         switch (m.kind) {
@@ -32,7 +32,7 @@ size_t node_type::size_of(const TypeTable &tb) const noexcept {
     return sz;
 }
 
-size_t node_type::align_of(const TypeTable &tb) const noexcept {
+size_t object_type::align_of(const TypeTable &tb) const noexcept {
     size_t a = tb.get(type_id).align;
     for (const auto &m : mods) {
         switch (m.kind) {
@@ -44,7 +44,7 @@ size_t node_type::align_of(const TypeTable &tb) const noexcept {
 }
 
 bool type_info::add_field(
-    const std::string &fname, const node_type &ftype, const TypeTable &tb
+    const std::string &fname, const object_type &ftype, const TypeTable &tb
 ) {
     for (const auto &f : fields)
         if (f.name == fname) return false;
@@ -78,32 +78,32 @@ void type_info::update_size() {
     if (size == 0) size = 1;
 }
 
-bool node_type::is_function(const TypeTable &tb) const noexcept {
+bool object_type::is_function(const TypeTable &tb) const noexcept {
     return mods.empty() && tb.get(type_id).is_function;
 }
 
-bool node_type::is_pointer(const TypeTable &tb) const noexcept {
+bool object_type::is_pointer(const TypeTable &tb) const noexcept {
     return !mods.empty() && mods.back().kind == modifier::Kind::Pointer;
 }
 
-bool node_type::is_array(const TypeTable &tb) const noexcept {
+bool object_type::is_array(const TypeTable &tb) const noexcept {
     return !mods.empty() && mods.back().kind == modifier::Kind::Array;
 }
 
-bool node_type::is_integer(const TypeTable &tb) const noexcept {
+bool object_type::is_integer(const TypeTable &tb) const noexcept {
     return mods.empty() && tb.get(type_id).is_integral;
 }
 
-bool node_type::is_void(const TypeTable &tb) const noexcept {
+bool object_type::is_void(const TypeTable &tb) const noexcept {
     static const unsigned void_type_id = tb.get_id("void_t");
     return mods.empty() && type_id == void_type_id;
 }
 
-bool node_type::is_struct(const TypeTable &tb) const noexcept {
+bool object_type::is_struct(const TypeTable &tb) const noexcept {
     return mods.empty() && tb.get(type_id).is_struct;
 }
 
-bool node_type::is_const(const TypeTable &tb) const noexcept {
+bool object_type::is_const(const TypeTable &tb) const noexcept {
     const type_info &ti = tb.get(type_id);
     if (is_struct(tb)) {
         for (auto &field : ti.fields)
@@ -111,20 +111,20 @@ bool node_type::is_const(const TypeTable &tb) const noexcept {
     }
     if (is_function(tb)) return true;
     if (mods.empty()) return _is_const;
-    if (mods.back().kind == node_type::modifier::Kind::Array)
+    if (mods.back().kind == object_type::modifier::Kind::Array)
         return pointee_type(tb).is_const(tb);
     return mods.back().is_const;
 }
 
-node_type node_type::pointee_type(const TypeTable &tb) const {
+object_type object_type::pointee_type(const TypeTable &tb) const {
     assert(is_pointer(tb) || is_array(tb));
-    node_type tp = *this;
+    object_type tp = *this;
     tp.mods.pop_back();
     return tp;
 }
 
-node_type node_type::as_const(const TypeTable &tb) const {
-    node_type tp = *this;
+object_type object_type::as_const(const TypeTable &tb) const {
+    object_type tp = *this;
     if (tp.mods.empty()) tp._is_const = true;
     else if (is_pointer(tb)) tp.mods.back().is_const = true;
     else {
@@ -150,7 +150,7 @@ std::string type_info::repr(const TypeTable &tb) const {
     return std::string(name);
 }
 
-std::string node_type::repr(const TypeTable &tb) const {
+std::string object_type::repr(const TypeTable &tb) const {
     const type_info &ti = tb.get(type_id);
     std::string res = ti.repr(tb);
 
@@ -231,4 +231,4 @@ void TypeTable::insert_basic_type(
     );
 }
 
-}; // namespace frontend::ast
+}; // namespace contract::hir

@@ -1,5 +1,5 @@
+#include "contract/hir/type_info.hpp"
 #include "frontend/ast/ast.hpp"
-#include "frontend/ast/type_info.hpp"
 #include "frontend/ast/types.hpp"
 #include "frontend/parser/context.hpp"
 #include "frontend/parser/source_map.hpp"
@@ -83,6 +83,7 @@ static node_type make_boolean_type(TypeTable &tb) {
 struct scope_entry {
     std::string name;
     node_type type;
+    node_t *declaration;
     bool is_global = false;
 };
 
@@ -95,6 +96,7 @@ struct function_entry {
     std::string name;
     node_type type{};
     std::optional<Ast::node_iter> body{};
+    node_t *declaration;
     parser::SourceLocation loc;
 };
 
@@ -134,16 +136,12 @@ struct context {
     scope_entry *lookup_var(std::string_view name);
     scope_entry *lookup_global_var(std::string_view name);
     bool insert_name(
-        std::string_view name,
-        const node_type &type,
-        bool is_global,
-        const loc_t &loc
+        std::string_view name, const node_type &type, bool is_global, node n
     );
 
     function_entry *get_function(std::string_view name);
-    function_entry *register_function(
-        std::string_view name, const node_type &type, const loc_t &loc
-    );
+    function_entry *
+    register_function(std::string_view name, const node_type &type, node n);
     bool declare_variable(node decl);
 
     bool is_lvalue(node n, bool require_global = false);
@@ -238,15 +236,13 @@ scope_entry *context::lookup_global_var(std::string_view name) {
 }
 
 bool context::insert_name(
-    std::string_view name,
-    const node_type &type,
-    bool is_global,
-    const loc_t &loc
+    std::string_view name, const node_type &type, bool is_global, node n
 ) {
     auto &layer = top_scope();
     auto it = std::ranges::find_if(layer.names, [name](auto &e) {
         return e.name == name;
     });
+    const auto &loc = n->get_data().loc;
     if (it != layer.names.end()) {
         return insert_error(
             std::format("redefinition of name `{}`", name), loc
@@ -259,7 +255,7 @@ bool context::insert_name(
         );
     }
 
-    layer.names.push_back({std::string(name), type, is_global});
+    layer.names.push_back({std::string(name), type, &n->get_data(), is_global});
     return true;
 }
 
@@ -272,8 +268,9 @@ function_entry *context::get_function(std::string_view name) {
 }
 
 function_entry *context::register_function(
-    std::string_view name, const node_type &type, const loc_t &loc
+    std::string_view name, const node_type &type, const node n
 ) {
+    const auto &loc = n->get_data().loc;
     if (get_function(name) || lookup_global_var(name)) {
         insert_error(
             std::format("redefinition of global name `{}`", name), loc
@@ -283,6 +280,7 @@ function_entry *context::register_function(
     functions.push_back({
         .name = std::string(name),
         .type = type,
+        .declaration = &n->get_data(),
         .loc = loc,
     });
     return &functions.back();
@@ -664,7 +662,7 @@ bool context::declare_variable(node decl) {
 
     // The declared name is not visible in its own initializer, so it is
     // inserted only afterwards initialization check.
-    return insert_name(dd.name, *type, is_global, decl->get_data().loc);
+    return insert_name(dd.name, *type, is_global, decl);
 }
 
 bool context::check_structure(node n) {
@@ -745,6 +743,7 @@ bool context::check_expr(node expr, const node_type *as_type, const_policy p) {
         const std::string &name = d.get<types::ID>().name;
         if (auto *entry = lookup_var(name)) {
             d.type = entry->type;
+            d.declaration = entry->declaration;
         } else if (auto *fn = get_function(name)) {
             d.type = fn->type;
         } else {
@@ -1427,7 +1426,7 @@ bool context::check_function(node stmt) {
                 decl->get_data().loc
             );
         }
-    } else if (!(fn = register_function(name, fn_type, stmt->get_data().loc))) {
+    } else if (!(fn = register_function(name, fn_type, stmt))) {
         return false;
     }
 

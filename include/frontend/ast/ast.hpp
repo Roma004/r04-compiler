@@ -1,10 +1,12 @@
 #pragma once
 
 #include <concepts>
+#include <memory>
 #include <utility>
 #include <variant>
 
-#include "frontend/ast/type_info.hpp"
+#include "contract/hir/hir.hpp"
+#include "contract/hir/type_info.hpp"
 #include "frontend/ast/types.hpp"
 #include "frontend/parser/source_map.hpp"
 #include "tools/tree.hpp"
@@ -14,6 +16,10 @@ struct ParserContext;
 };
 
 namespace frontend::ast {
+
+using node_type = contract::hir::object_type;
+using contract::hir::type_info;
+using contract::hir::TypeTable;
 
 struct node_t {
     template <typename T>
@@ -74,6 +80,7 @@ struct node_t {
         val;
     parser::SourceLocation loc = {};
     std::optional<node_type> type;
+    node_t *declaration;
 };
 
 struct edge_t {
@@ -90,6 +97,8 @@ class Ast : public ast_tree_t {
     using const_edge_iter = tree_t::const_edge_iter;
 
     bool check_semantics(parser::ParserContext &);
+
+    std::unique_ptr<contract::hir::TranslationUnit> make_hir();
 
     TypeTable types;
 
